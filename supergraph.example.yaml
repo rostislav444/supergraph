@@ -1,0 +1,33 @@
+# Supergraph Configuration Example
+# Copy this to supergraph.yaml and customize for your project
+
+version: 1
+project: my-supergraph-app
+
+gateway:
+  port: 8000
+
+services:
+  person:
+    port: 8002
+    database: person_db
+    entities:
+      - Person
+
+  property:
+    port: 8001
+    database: property_db
+    entities:
+      - Property
+
+  relations:
+    port: 8003
+    database: relations_db
+    entities:
+      - Relationship
+
+postgres:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: postgres

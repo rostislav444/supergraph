@@ -52,6 +52,7 @@ class Gateway:
         hcl_output_path: Optional[str] = None,
         playground: bool = True,
         playground_path: str = "/playground",
+        redis_url: Optional[str] = None,
     ):
         """
         Initialize gateway.
@@ -63,6 +64,7 @@ class Gateway:
             hcl_output_path: Path to save supergraph.hcl (default: ./supergraph.hcl)
             playground: Enable visual playground (default: True)
             playground_path: URL path for playground (default: /playground)
+            redis_url: Redis URL for WebSocket subscriptions (optional)
         """
         self.services = services
         self.title = title
@@ -70,6 +72,7 @@ class Gateway:
         self.hcl_output_path = hcl_output_path or self._default_hcl_path()
         self.playground_enabled = playground
         self.playground_path = playground_path
+        self.redis_url = redis_url or os.getenv("REDIS_URL")
 
         # Build graph
         self.graph = self._build_graph()
@@ -123,15 +126,22 @@ class Gateway:
 
         # Merge schemas
         entities = {}
+        websockets = {}
         attached_relations = []
 
         for schema in results:
             if schema is None:
                 continue
 
+            # Merge HTTP entities
             for entity_name, entity_def in schema.get("entities", {}).items():
                 entities[entity_name] = entity_def
 
+            # Merge WebSocket entities
+            for ws_name, ws_def in schema.get("websockets", {}).items():
+                websockets[ws_name] = ws_def
+
+            # Collect attached relations
             if "attached_relations" in schema:
                 attached_relations.extend(schema["attached_relations"])
 
@@ -162,7 +172,13 @@ class Gateway:
         }
 
         # Transform to new format with relation_providers and presets
-        return transform_graph_to_new_format(legacy_graph)
+        transformed_graph = transform_graph_to_new_format(legacy_graph)
+
+        # Add websockets to transformed graph
+        if websockets:
+            transformed_graph["websockets"] = websockets
+
+        return transformed_graph
 
     async def _fetch_schema(self, client: httpx.AsyncClient, name: str, url: str) -> dict | None:
         """Fetch schema from a single service."""
@@ -218,6 +234,12 @@ class Gateway:
         async def graph_hcl():
             return to_hcl(self.graph)
 
+        # WebSocket subscriptions (auto-discovered)
+        if self.graph.get("websockets") and self.redis_url:
+            self._setup_websocket_federation(app)
+        elif self.graph.get("websockets") and not self.redis_url:
+            print("Warning: WebSocket entities found in schema but no redis_url provided. WebSocket endpoint not created.")
+
         # Mount playground
         if self.playground_enabled:
             mount_playground(
@@ -228,3 +250,29 @@ class Gateway:
             )
 
         return app
+
+    def _setup_websocket_federation(self, app: FastAPI):
+        """Setup WebSocket federation for real-time subscriptions"""
+        from .websocket import create_websocket_router
+        from .api.router import get_principal
+
+        ws_router = create_websocket_router(
+            graph=self.graph,
+            redis_url=self.redis_url
+        )
+
+        @app.on_event("startup")
+        async def ws_startup():
+            await ws_router.startup()
+            websocket_count = len(self.graph.get("websockets", {}))
+            print(f"WebSocket federation enabled: {websocket_count} subscription(s) discovered")
+
+        @app.on_event("shutdown")
+        async def ws_shutdown():
+            await ws_router.shutdown()
+
+        @app.websocket("/subscribe")
+        async def websocket_endpoint(websocket: WebSocket):
+            # Get principal (from query params, headers, or default)
+            principal = await get_principal()
+            await ws_router.handle_connection(websocket, principal)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from ..core.query_types import (
     NormalizedFilter,

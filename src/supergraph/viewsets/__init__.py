@@ -17,6 +17,15 @@ from .base import (
     RelationsViewSet,
     Through,
 )
+from .websocket import (
+    Subscription,
+    SubscriptionConfig,
+)
+from .cache import (
+    CacheConfig,
+    register_cache_handlers,
+    init_cache_handlers,
+)
 
 __all__ = [
     "ModelViewSet",
@@ -26,4 +35,9 @@ __all__ = [
     "Through",
     "Ref",
     "AccessConfig",
+    "Subscription",
+    "SubscriptionConfig",
+    "CacheConfig",
+    "register_cache_handlers",
+    "init_cache_handlers",
 ]

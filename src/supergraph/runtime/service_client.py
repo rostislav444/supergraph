@@ -86,8 +86,8 @@ class ServiceClient:
         """
         client = await self._get_client()
 
-        # Build request
-        url = f"{service_url.rstrip('/')}/internal/query"
+        # Build request - include resource path (e.g., /person/internal/query)
+        url = f"{service_url.rstrip('/')}{resource}/internal/query"
         request = InternalQueryRequest(
             filters=filters,
             fields=fields,

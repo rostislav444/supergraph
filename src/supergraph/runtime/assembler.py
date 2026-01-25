@@ -155,22 +155,9 @@ class ResponseAssembler:
                 children = children_by_key.get(parent_key, [])
                 parent_item[step.attach_as] = children[0] if children else None
             else:
-                # Attach list with pagination wrapper
-                # IMPORTANT: Do NOT apply limit/offset again - service already did it!
-                # Just pass through what the service returned
+                # Attach list directly (no pagination wrapper for nested relations)
                 children = children_by_key.get(parent_key, [])
-
-                # For nested "many" relations, we group by parent key
-                # The pagination reflects what this parent's children are
-                parent_item[step.attach_as] = {
-                    "items": children,
-                    "pagination": {
-                        "total": child_result.total,
-                        "limit": child_result.limit,
-                        "offset": child_result.offset,
-                        "has_next": self._has_next(child_result),
-                    },
-                }
+                parent_item[step.attach_as] = children
 
     def _has_next(self, result: InternalQueryResponse) -> bool:
         """Check if there are more items after current page."""

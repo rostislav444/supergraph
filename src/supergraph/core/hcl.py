@@ -258,6 +258,7 @@ def transform_graph_to_new_format(graph: dict[str, Any]) -> dict[str, Any]:
     for entity_name, entity_def in graph.get("entities", {}).items():
         new_entity = {
             "service": entity_def["service"],
+            "resource": entity_def.get("resource", "/" + entity_name.lower()),
             "keys": entity_def.get("keys", ["id"]),
             "fields": entity_def.get("fields", {}),
             "access": entity_def.get("access", {"tenant_strategy": "none"}),

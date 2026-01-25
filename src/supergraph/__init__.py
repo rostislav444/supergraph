@@ -76,6 +76,10 @@ from .viewsets import (
     RelationConfig,
     RelationsViewSet,
     Through,
+    Subscription,
+    SubscriptionConfig,
+    CacheConfig,
+    init_cache_handlers,
 )
 from .gateway import Gateway
 from .playground import get_playground_html, mount_playground
@@ -86,6 +90,7 @@ from .service import (
     create_internal_router,
     create_service_app,
     get_engine,
+    get_service_schema,
     get_session,
     init_db,
 )
@@ -159,6 +164,10 @@ __all__ = [
     "Through",
     "Ref",
     "AccessConfig",
+    "Subscription",
+    "SubscriptionConfig",
+    "CacheConfig",
+    "init_cache_handlers",
     # Gateway
     "Gateway",
     # Playground
@@ -170,6 +179,7 @@ __all__ = [
     "InternalRouter",
     "Base",
     "get_session",
+    "get_service_schema",
     "init_db",
     "close_db",
     "get_engine",

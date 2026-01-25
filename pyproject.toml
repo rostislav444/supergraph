@@ -75,15 +75,14 @@ Issues = "https://github.com/your-org/supergraph/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/supergraph"]
 
-# Include bundled playground frontend (run scripts/build_playground.sh first)
-[tool.hatch.build.targets.wheel.shared-data]
-"src/supergraph/playground/dist" = "supergraph/playground/dist"
+# Include bundled playground frontend
+[tool.hatch.build.targets.wheel.force-include]
+"src/supergraph/api/playground" = "supergraph/playground/dist"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
     "/tests",
-    "/playground",
     "/scripts",
     "/README.md",
     "/LICENSE",

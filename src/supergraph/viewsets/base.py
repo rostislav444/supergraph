@@ -10,17 +10,15 @@ Usage:
 
     class RelationshipViewSet(RelationsViewSet):
         model = Relationship
-        # Override if needed:
-        # service = "relations"  # default: "relationship"
-        # resource = "/relationship"  # default: "/relationship"
+        service = "relations"  # override default
 
         attach = [
+            # Add "ownedProperties" field to Person entity
             AttachRelation(
                 parent_entity="Person",
-                name="owned_properties",
-                target_entity="Relationship",
-                cardinality="many",
-                through=Through(...),
+                field_name="ownedProperties",
+                target_entity="Property",
+                relationship_type="property_owner",
             ),
         ]
 """
@@ -29,7 +27,7 @@ from __future__ import annotations
 
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Optional, List
 
 from sqlalchemy import inspect
 from sqlalchemy.orm import DeclarativeBase
@@ -63,11 +61,32 @@ class AttachRelation:
 
     Used by RelationsViewSet to inject relations into other entities
     without modifying their viewsets.
+
+    Simplified approach:
+    - Auto-infers subject_type/object_type from entity names
+    - Defaults: status="active", id_field="id"
+    - No need for Through class in simple cases
+
+    Example:
+        AttachRelation(
+            parent_entity="Person",        # Add field to Person
+            field_name="ownedProperties",  # Field name
+            target_entity="Property",      # Returns Property objects
+            relationship_type="property_owner",  # How to find relation
+        )
     """
-    parent_entity: str          # Entity to attach relation to (e.g. "Person")
-    name: str                   # Relation name (e.g. "owned_properties")
-    target_entity: str          # Target entity (e.g. "Relationship")
+    parent_entity: str          # Entity to attach field to (e.g. "Person")
+    field_name: str             # Name of the GraphQL field (e.g. "ownedProperties")
+    target_entity: str          # Target entity type (e.g. "Property")
+    relationship_type: str      # Relationship type in DB (e.g. "property_owner")
+
+    # Optional overrides (with sensible defaults)
+    parent_id_field: str = "id"
+    target_id_field: str = "id"
+    filters: dict[str, Any] = field(default_factory=lambda: {"status": "active"})
     cardinality: Literal["one", "many"] = "many"
+
+    # Legacy support (deprecated - use simplified approach above)
     through: Through | None = None
     ref: Ref | None = None
 
@@ -247,6 +266,9 @@ class ModelViewSet:
     # Access control
     access: AccessConfig = field(default_factory=AccessConfig.none)
 
+    # Cache configuration
+    cache: Optional["CacheConfig"] = None
+
     @classmethod
     def get_entity_name(cls) -> str:
         """Get entity name (model class name)."""
@@ -335,30 +357,25 @@ class RelationsViewSet(ModelViewSet):
     In addition to being an entity itself, it can attach relations
     to other entities without modifying their viewsets.
 
-    Example:
+    Example (simplified approach):
         class RelationshipViewSet(RelationsViewSet):
             model = Relationship
-            service = "relations"  # override: default would be "relationship"
+            service = "relations"
 
             attach = [
+                # Person.ownedProperties -> [Property]
                 AttachRelation(
                     parent_entity="Person",
-                    name="owned_properties",
-                    target_entity="Relationship",
-                    cardinality="many",
-                    through=Through(
-                        parent_key="id",
-                        child_match_field="object_id",
-                        static_filters={"relationship_type": "property_owner"},
-                        target_key_field="subject_id",
-                    ),
-                ),
-                AttachRelation(
-                    parent_entity="Relationship",
-                    name="property",
+                    field_name="ownedProperties",
                     target_entity="Property",
-                    cardinality="one",
-                    ref=Ref(from_field="subject_id", to_field="id"),
+                    relationship_type="property_owner",
+                ),
+                # Property.owners -> [Person]
+                AttachRelation(
+                    parent_entity="Property",
+                    field_name="owners",
+                    target_entity="Person",
+                    relationship_type="property_owner",
                 ),
             ]
     """
@@ -377,4 +394,5 @@ ModelViewSet.access = AccessConfig.none()
 ModelViewSet.relations = {}
 ModelViewSet.fields_exclude = []
 ModelViewSet.filter_overrides = {}
+ModelViewSet.cache = None
 RelationsViewSet.attach = []

@@ -892,6 +892,22 @@ function DataFieldItem({ name, field, selected, value, onToggle, onValueChange, 
                 <option value="false">false</option>
                 <option value="true">true</option>
               </select>
+            ) : field.type === 'date' ? (
+              <input
+                type="date"
+                value={value ? (typeof value === 'string' ? value.slice(0, 10) : '') : ''}
+                onChange={(e) => onValueChange(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-gray-700 text-xs h-5 px-1.5 rounded border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
+              />
+            ) : field.type === 'datetime' ? (
+              <input
+                type="datetime-local"
+                value={value ? (typeof value === 'string' ? value.slice(0, 16) : '') : ''}
+                onChange={(e) => onValueChange(e.target.value ? new Date(e.target.value).toISOString() : '')}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-gray-700 text-xs h-5 px-1.5 rounded border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
+              />
             ) : (
               <input
                 type={field.type === 'int' ? 'number' : 'text'}
@@ -1739,6 +1755,26 @@ function TransactionStepCard({
                               <option value="false">false</option>
                               <option value="true">true</option>
                             </select>
+                          ) : field.type === 'date' ? (
+                            <input
+                              type="date"
+                              value={value ? (typeof value === 'string' ? value.slice(0, 10) : '') : ''}
+                              onChange={(e) => handleValueChange(name, e.target.value)}
+                              className={clsx(
+                                "w-full bg-gray-700 text-[10px] h-5 px-1 rounded border text-white",
+                                isEmptyRequired ? "border-red-500" : "border-gray-600"
+                              )}
+                            />
+                          ) : field.type === 'datetime' ? (
+                            <input
+                              type="datetime-local"
+                              value={value ? (typeof value === 'string' ? value.slice(0, 16) : '') : ''}
+                              onChange={(e) => handleValueChange(name, e.target.value ? new Date(e.target.value).toISOString() : '')}
+                              className={clsx(
+                                "w-full bg-gray-700 text-[10px] h-5 px-1 rounded border text-white",
+                                isEmptyRequired ? "border-red-500" : "border-gray-600"
+                              )}
+                            />
                           ) : (
                             <input
                               type={field.type === 'int' ? 'number' : 'text'}

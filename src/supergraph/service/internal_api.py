@@ -21,11 +21,12 @@ Usage:
 from __future__ import annotations
 
 
+from datetime import date, datetime
 from typing import Any, Callable, List, Optional, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -150,8 +151,11 @@ class InternalRouter:
         session: AsyncSession,
     ) -> InternalMutationResponse:
         """Handle create request."""
+        # Coerce data types to match model columns
+        coerced_data = self._coerce_data(request.data)
+
         # Create new instance
-        instance = self.model(**request.data)
+        instance = self.model(**coerced_data)
         session.add(instance)
         await session.commit()
         await session.refresh(instance)
@@ -171,10 +175,13 @@ class InternalRouter:
         if not request.filters:
             raise HTTPException(status_code=400, detail="Filters required for update")
 
+        # Coerce data types
+        coerced_data = self._coerce_data(request.data)
+
         # Build update statement
         stmt = update(self.model)
         stmt = self._apply_filters_to_update(stmt, request.filters)
-        stmt = stmt.values(**request.data)
+        stmt = stmt.values(**coerced_data)
 
         # Execute update
         result = await session.execute(stmt)
@@ -209,11 +216,14 @@ class InternalRouter:
         if not rows:
             raise HTTPException(status_code=404, detail="No records found to rewrite")
 
+        # Coerce data types
+        coerced_data = self._coerce_data(request.data)
+
         # Update each record with full replacement
         items = []
         for row in rows:
             # Reset all fields to data values
-            for key, value in request.data.items():
+            for key, value in coerced_data.items():
                 if hasattr(row, key):
                     setattr(row, key, value)
             items.append(row)
@@ -313,6 +323,79 @@ class InternalRouter:
             for column in instance.__table__.columns:
                 result[column.name] = getattr(instance, column.name)
         return result
+
+    def _coerce_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Coerce data values to match model column types.
+
+        Handles:
+        - int -> str for String columns
+        - str -> date for Date columns (YYYY-MM-DD format)
+        - str -> datetime for DateTime columns
+        """
+        if not data:
+            return data
+
+        mapper = inspect(self.model)
+        coerced = {}
+
+        for key, value in data.items():
+            if value is None:
+                coerced[key] = value
+                continue
+
+            # Find the column
+            column = mapper.columns.get(key)
+            if column is None:
+                coerced[key] = value
+                continue
+
+            col_type = column.type.__class__.__name__.lower()
+
+            # String columns - convert int/float to str
+            if col_type in ('string', 'text', 'varchar'):
+                if isinstance(value, (int, float)):
+                    coerced[key] = str(value)
+                else:
+                    coerced[key] = value
+
+            # Date columns - parse string to date
+            elif col_type == 'date':
+                if isinstance(value, str):
+                    try:
+                        # Try YYYY-MM-DD format
+                        coerced[key] = datetime.strptime(value[:10], '%Y-%m-%d').date()
+                    except ValueError:
+                        # Try other formats or use today as fallback
+                        coerced[key] = date.today()
+                elif isinstance(value, date):
+                    coerced[key] = value
+                else:
+                    coerced[key] = value
+
+            # DateTime columns - parse string to datetime
+            elif col_type in ('datetime', 'timestamp'):
+                if isinstance(value, str):
+                    try:
+                        coerced[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    except ValueError:
+                        coerced[key] = datetime.now()
+                elif isinstance(value, datetime):
+                    coerced[key] = value
+                else:
+                    coerced[key] = value
+
+            # Integer columns - convert str to int
+            elif col_type in ('integer', 'biginteger', 'smallinteger'):
+                if isinstance(value, str) and value.isdigit():
+                    coerced[key] = int(value)
+                else:
+                    coerced[key] = value
+
+            else:
+                coerced[key] = value
+
+        return coerced
 
 
 def create_internal_router(

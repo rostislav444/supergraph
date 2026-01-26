@@ -30,13 +30,13 @@ from __future__ import annotations
 
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, List, Literal, Optional
 
 from .errors import ValidationError
 
 
 # Operation types
-OperationType = Literal["query", "create", "update", "rewrite", "delete"]
+OperationType = Literal["query", "create", "update", "rewrite", "delete", "get_or_create"]
 
 # HTTP method aliases
 HTTP_ALIASES: dict[str, OperationType] = {
@@ -47,7 +47,7 @@ HTTP_ALIASES: dict[str, OperationType] = {
 }
 
 # All recognized operation keys
-OPERATION_KEYS = {"query", "create", "update", "rewrite", "delete", "transaction"} | set(HTTP_ALIASES.keys())
+OPERATION_KEYS = {"query", "create", "update", "rewrite", "delete", "transaction", "get_or_create"} | set(HTTP_ALIASES.keys())
 
 
 @dataclass
@@ -107,12 +107,23 @@ class EntityMutation:
 
     @classmethod
     def from_dict(cls, entity: str, operation: OperationType, data: dict) -> "EntityMutation":
-        """Parse entity mutation from dict."""
+        """
+        Parse entity mutation from dict.
+
+        Supports both 'id' (safe single-record) and 'filters' (legacy) formats.
+        When 'id' is provided, it's converted to {"id__eq": value} filter.
+        """
+        # Support 'id' as a safer alternative to 'filters' for single-record mutations
+        filters = data.get("filters", {})
+        if "id" in data and data["id"] is not None:
+            # Convert id to filter - this ensures only one record is affected
+            filters = {"id__eq": data["id"]}
+
         return cls(
             entity=entity,
             operation=operation,
             data=data.get("data", {}),
-            filters=data.get("filters", {}),
+            filters=filters,
             response=data.get("response"),
             alias=data.get("as"),
         )
@@ -138,7 +149,7 @@ class TransactionStep:
         entity = None
         entity_data = None
 
-        for op in ["create", "update", "rewrite", "delete", "query"]:
+        for op in ["create", "update", "rewrite", "delete", "query", "get_or_create"]:
             if op in step_data:
                 operation = op
                 # Entity is the key inside operation
@@ -151,11 +162,16 @@ class TransactionStep:
         if not operation or not entity:
             raise ValidationError("Transaction step must have operation with entity")
 
+        # Support 'id' as safer alternative to 'filters'
+        filters = entity_data.get("filters", {})
+        if "id" in entity_data and entity_data["id"] is not None:
+            filters = {"id__eq": entity_data["id"]}
+
         return cls(
             operation=operation,
             entity=entity,
             data=entity_data.get("data", {}),
-            filters=entity_data.get("filters", {}),
+            filters=filters,
             response=entity_data.get("response"),
             alias=step_data.get("as"),
             depends_on=step_data.get("depends_on"),
@@ -200,14 +216,16 @@ class RequestParser:
     Handles all supported formats and normalizes to ParsedRequest.
     """
 
-    def __init__(self, known_entities: set[str]):
+    def __init__(self, known_entities: set[str], graph: dict | None = None):
         """
         Initialize parser.
 
         Args:
             known_entities: Set of valid entity names from graph schema
+            graph: Full graph schema (needed for nested compilation)
         """
         self.known_entities = known_entities
+        self.graph = graph
 
     def parse(self, body: dict[str, Any]) -> ParsedRequest:
         """
@@ -242,13 +260,47 @@ class RequestParser:
                     result.queries[entity] = EntityQuery.from_dict(entity, entity_data)
 
             elif normalized_key in ("create", "update", "rewrite", "delete"):
-                # Mutation
+                # Mutation - check for nested syntax
                 for entity, entity_data in value.items():
                     if entity not in self.known_entities:
                         raise ValidationError(f"Unknown entity: {entity}")
-                    result.mutations.append(
-                        EntityMutation.from_dict(entity, normalized_key, entity_data)
-                    )
+
+                    # Check for nested syntax - compile to transaction
+                    if "nested" in entity_data and self.graph:
+                        from .nested_compiler import NestedCompiler
+                        compiler = NestedCompiler(self.graph)
+                        nested_tx = compiler.compile(entity, normalized_key, entity_data)
+                        if result.transaction:
+                            # Merge with existing transaction
+                            result.transaction.steps.extend(nested_tx.steps)
+                        else:
+                            result.transaction = nested_tx
+                    else:
+                        result.mutations.append(
+                            EntityMutation.from_dict(entity, normalized_key, entity_data)
+                        )
+
+            elif normalized_key == "get_or_create":
+                # Get-or-create operation - compile to special transaction
+                for entity, entity_data in value.items():
+                    if entity not in self.known_entities:
+                        raise ValidationError(f"Unknown entity: {entity}")
+
+                    if self.graph:
+                        from .nested_compiler import NestedCompiler
+                        compiler = NestedCompiler(self.graph)
+                        goc_tx = compiler.compile_get_or_create(
+                            entity=entity,
+                            lookup=entity_data.get("lookup", {}),
+                            defaults=entity_data.get("defaults", {}),
+                            response=entity_data.get("response"),
+                        )
+                        if result.transaction:
+                            result.transaction.steps.extend(goc_tx.steps)
+                        else:
+                            result.transaction = goc_tx
+                    else:
+                        raise ValidationError("get_or_create requires graph schema")
 
             elif key in self.known_entities:
                 # Single entity shorthand (query)
@@ -283,16 +335,21 @@ class RequestParser:
         return result
 
 
-def parse_request(body: dict[str, Any], known_entities: set[str]) -> ParsedRequest:
+def parse_request(
+    body: dict[str, Any],
+    known_entities: set[str],
+    graph: dict | None = None,
+) -> ParsedRequest:
     """
     Convenience function to parse a request.
 
     Args:
         body: Raw request body
         known_entities: Set of valid entity names
+        graph: Full graph schema (needed for nested compilation)
 
     Returns:
         ParsedRequest
     """
-    parser = RequestParser(known_entities)
+    parser = RequestParser(known_entities, graph)
     return parser.parse(body)

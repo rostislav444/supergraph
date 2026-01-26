@@ -13,7 +13,7 @@ from typing import Optional
 
 from .app import create_service_app
 from .database import Base, get_session, init_db, close_db, get_engine
-from .internal_api import create_internal_router, InternalRouter
+from .internal_api import create_internal_router, InternalRouter, create_unified_internal_router, UnifiedInternalRouter
 from .schema import get_service_schema
 
 __all__ = [
@@ -28,6 +28,8 @@ __all__ = [
     # Internal API
     "create_internal_router",
     "InternalRouter",
+    "create_unified_internal_router",
+    "UnifiedInternalRouter",
     # Schema
     "get_service_schema",
 ]

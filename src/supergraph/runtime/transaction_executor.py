@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from typing import Optional
+
 from supergraph.core.query_types import MutationResult, TransactionResult
 from supergraph.core.request_parser import Transaction, TransactionStep, EntityMutation
 from supergraph.core.errors import ExecutionError
@@ -50,14 +52,16 @@ class TransactionExecutor:
     }
     """
 
-    def __init__(self, mutation_executor: MutationExecutor):
+    def __init__(self, mutation_executor: MutationExecutor, query_executor=None):
         """
         Initialize transaction executor.
 
         Args:
             mutation_executor: Executor for individual mutations
+            query_executor: Executor for queries (needed for get_or_create)
         """
         self.mutation_executor = mutation_executor
+        self.query_executor = query_executor
 
     async def execute(self, transaction: Transaction) -> TransactionResult:
         """
@@ -78,6 +82,36 @@ class TransactionExecutor:
                 # Resolve variable references in step data
                 resolved_data = self._resolve_refs(step.data, variables)
                 resolved_filters = self._resolve_refs(step.filters, variables)
+
+                # Handle get_or_create specially
+                if step.operation == "get_or_create":
+                    result = await self._execute_get_or_create(
+                        step, resolved_data, resolved_filters
+                    )
+                    results.append(result)
+
+                    if result.success and step.alias and result.data:
+                        var_name = step.alias.lstrip("$")
+                        variables[var_name] = result.data
+
+                    if not result.success and not step.optional:
+                        if transaction.on_error == "rollback":
+                            await self._compensate(completed_creates)
+                            return TransactionResult(
+                                success=False,
+                                results=results,
+                                variables=variables,
+                                rolled_back=True,
+                                error=f"get_or_create failed: {result.error}",
+                            )
+                        elif transaction.on_error == "stop":
+                            return TransactionResult(
+                                success=False,
+                                results=results,
+                                variables=variables,
+                                error=f"get_or_create failed: {result.error}",
+                            )
+                    continue
 
                 # Create mutation from step
                 mutation = EntityMutation(
@@ -161,6 +195,71 @@ class TransactionExecutor:
             except Exception:
                 # Log but continue with remaining compensations
                 pass
+
+    async def _execute_get_or_create(
+        self,
+        step: TransactionStep,
+        resolved_data: dict[str, Any],
+        resolved_filters: dict[str, Any],
+    ) -> MutationResult:
+        """
+        Execute a get-or-create operation.
+
+        1. Query for existing record using filters
+        2. If found, return it
+        3. If not found, create new record with data
+
+        Args:
+            step: Transaction step with get_or_create operation
+            resolved_data: Data for creation (with variables resolved)
+            resolved_filters: Lookup filters (with variables resolved)
+
+        Returns:
+            MutationResult with found or created record
+        """
+        # First, try to find existing record
+        if self.query_executor:
+            try:
+                # Query with the lookup filters
+                existing = await self.query_executor.execute_simple(
+                    entity=step.entity,
+                    filters=resolved_filters,
+                    fields=step.response or ["id"],
+                    limit=1,
+                )
+
+                if existing and len(existing) > 0:
+                    # Found existing record
+                    return MutationResult(
+                        entity=step.entity,
+                        operation="get_or_create",
+                        success=True,
+                        data=existing[0],
+                        count=1,
+                    )
+            except Exception as e:
+                # Query failed, proceed to create
+                pass
+
+        # Not found (or no query executor), create new record
+        create_mutation = EntityMutation(
+            entity=step.entity,
+            operation="create",
+            data=resolved_data,
+            response=step.response,
+        )
+
+        result = await self.mutation_executor.execute(create_mutation)
+
+        # Adjust operation name in result
+        return MutationResult(
+            entity=step.entity,
+            operation="get_or_create",
+            success=result.success,
+            data=result.data,
+            error=result.error,
+            count=result.count,
+        )
 
     def _resolve_refs(self, data: Any, variables: dict[str, Any]) -> Any:
         """

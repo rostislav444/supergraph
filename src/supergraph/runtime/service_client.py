@@ -65,18 +65,20 @@ class ServiceClient:
         order: Optional[List[NormalizedOrder]] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        entity: Optional[str] = None,
     ) -> InternalQueryResponse:
         """
         Fetch data from a service.
 
         Args:
             service_url: Base URL of the service (e.g., "http://person:8002")
-            resource: Resource path (e.g., "/person")
+            resource: Resource path (e.g., "/person") - used for legacy per-entity endpoints
             filters: List of normalized filters
             fields: List of fields to return
             order: Optional ordering
             limit: Optional limit for pagination
             offset: Offset for pagination
+            entity: Entity name for unified endpoints (e.g., "PropertyType")
 
         Returns:
             InternalQueryResponse with items and pagination info
@@ -86,9 +88,10 @@ class ServiceClient:
         """
         client = await self._get_client()
 
-        # Build request - include resource path (e.g., /person/internal/query)
-        url = f"{service_url.rstrip('/')}{resource}/internal/query"
+        # Use unified endpoint at /internal/query (services use entity in request body)
+        url = f"{service_url.rstrip('/')}/internal/query"
         request = InternalQueryRequest(
+            entity=entity,
             filters=filters,
             fields=fields,
             order=order or [],
@@ -131,16 +134,18 @@ class ServiceClient:
         ids: list[Any],
         id_field: str,
         fields: list[str],
+        entity: Optional[str] = None,
     ) -> InternalQueryResponse:
         """
         Convenience method to fetch by a list of IDs.
 
         Args:
             service_url: Base URL of the service
-            resource: Resource path
+            resource: Resource path (legacy, kept for compatibility)
             ids: List of IDs to fetch
             id_field: Field name to filter on (usually "id")
             fields: List of fields to return
+            entity: Entity name for unified endpoints
 
         Returns:
             InternalQueryResponse with items
@@ -156,4 +161,5 @@ class ServiceClient:
             fields=fields,
             limit=None,  # No limit when fetching by IDs
             offset=0,
+            entity=entity,
         )

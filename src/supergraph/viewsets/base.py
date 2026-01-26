@@ -137,26 +137,41 @@ DEFAULT_FILTERS_BY_TYPE = {
 DEFAULT_SORTABLE_TYPES = {"int", "string", "float", "datetime", "date", "bool"}
 
 
-def get_column_type(column) -> str:
-    """Map SQLAlchemy column type to simple type string."""
+def get_column_type(column) -> tuple[str, list[str] | None]:
+    """
+    Map SQLAlchemy column type to simple type string.
+
+    Returns:
+        Tuple of (type_name, enum_values or None)
+    """
     type_name = column.type.__class__.__name__.lower()
 
     if type_name in ("integer", "biginteger", "smallinteger"):
-        return "int"
+        return "int", None
     elif type_name in ("string", "text", "varchar"):
-        return "string"
+        return "string", None
     elif type_name in ("boolean",):
-        return "bool"
+        return "bool", None
     elif type_name in ("float", "numeric", "decimal"):
-        return "float"
+        return "float", None
     elif type_name in ("datetime", "timestamp"):
-        return "datetime"
+        return "datetime", None
     elif type_name in ("date",):
-        return "date"
+        return "date", None
     elif type_name in ("json", "jsonb"):
-        return "json"
+        return "json", None
+    elif type_name == "enum":
+        # Extract enum values from SQLAlchemy Enum type
+        enum_values = None
+        if hasattr(column.type, 'enum_class') and column.type.enum_class is not None:
+            # Python Enum class
+            enum_values = [e.value for e in column.type.enum_class]
+        elif hasattr(column.type, 'enums'):
+            # String-based enum
+            enum_values = list(column.type.enums)
+        return "enum", enum_values
     else:
-        return "string"
+        return "string", None
 
 
 def introspect_model_fields(
@@ -188,27 +203,40 @@ def introspect_model_fields(
         if fields_include is not None and field_name not in fields_include:
             continue
 
-        # Determine type
-        field_type = get_column_type(column)
+        # Determine type and enum values
+        field_type, enum_values = get_column_type(column)
 
         # Determine filters
         if field_name in filter_overrides:
             filters = filter_overrides[field_name]
         else:
-            filters = DEFAULT_FILTERS_BY_TYPE.get(field_type, ["eq", "in"])
+            # For enums, use string-like filters
+            filter_type = "string" if field_type == "enum" else field_type
+            filters = DEFAULT_FILTERS_BY_TYPE.get(filter_type, ["eq", "in"])
 
         # Determine sortable
         if sortable_fields is not None:
             sortable = field_name in sortable_fields
         else:
-            # By default, scalar types except json are sortable
-            sortable = field_type in DEFAULT_SORTABLE_TYPES
+            # By default, scalar types except json are sortable (enums too)
+            sortable = field_type in DEFAULT_SORTABLE_TYPES or field_type == "enum"
 
-        result[field_name] = {
+        # Determine nullable (primary keys are never nullable for our purposes)
+        is_primary_key = column.primary_key
+        nullable = column.nullable if not is_primary_key else True  # id is always auto-generated
+
+        field_def = {
             "type": field_type,
             "filters": filters,
             "sortable": sortable,
+            "nullable": nullable,
         }
+
+        # Add enum values if present
+        if enum_values is not None:
+            field_def["enum_values"] = enum_values
+
+        result[field_name] = field_def
 
     return result
 

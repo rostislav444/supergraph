@@ -142,6 +142,7 @@ class PlanExecutor:
             order=step.order,
             limit=step.limit,
             offset=step.offset,
+            entity=step.entity,
         )
 
     def _resolve_filters(

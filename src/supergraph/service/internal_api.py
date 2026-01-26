@@ -21,7 +21,7 @@ Usage:
 from __future__ import annotations
 
 
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, List, Optional, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -333,3 +333,119 @@ def create_internal_router(
     """
     factory = InternalRouter(model, get_session)
     return factory.create_router(prefix)
+
+
+class UnifiedInternalRouter:
+    """
+    Creates unified /internal/* endpoints that handle multiple entities.
+
+    Usage:
+        from supergraph.service import create_unified_internal_router
+
+        router = create_unified_internal_router(
+            entity_map={"Person": Person, "Contact": Contact},
+            get_session=get_session,
+        )
+        app.include_router(router)
+    """
+
+    def __init__(
+        self,
+        entity_map: dict[str, type[ModelT]],
+        get_session: Callable[[], AsyncSession],
+    ):
+        self.entity_map = entity_map
+        self.get_session = get_session
+
+    def _get_model(self, entity_name: str) -> type[ModelT]:
+        """Get model by entity name."""
+        if entity_name not in self.entity_map:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown entity: {entity_name}. Available: {list(self.entity_map.keys())}"
+            )
+        return self.entity_map[entity_name]
+
+    def create_router(self) -> APIRouter:
+        """Create FastAPI router with unified internal endpoints."""
+        router = APIRouter()
+
+        @router.post("/internal/query", response_model=InternalQueryResponse)
+        async def internal_query(
+            request: InternalQueryRequest,
+            session: AsyncSession = Depends(self.get_session),
+        ) -> InternalQueryResponse:
+            # Determine model from entity field or use first available
+            entity = request.entity
+            if not entity:
+                entity = list(self.entity_map.keys())[0]
+            model = self._get_model(entity)
+            handler = InternalRouter(model, self.get_session)
+            return await handler._handle_query(request, session)
+
+        @router.post("/internal/create", response_model=InternalMutationResponse)
+        async def internal_create(
+            request: InternalMutationRequest,
+            session: AsyncSession = Depends(self.get_session),
+        ) -> InternalMutationResponse:
+            model = self._get_model(request.entity)
+            handler = InternalRouter(model, self.get_session)
+            return await handler._handle_create(request, session)
+
+        @router.post("/internal/update", response_model=InternalMutationResponse)
+        async def internal_update(
+            request: InternalMutationRequest,
+            session: AsyncSession = Depends(self.get_session),
+        ) -> InternalMutationResponse:
+            model = self._get_model(request.entity)
+            handler = InternalRouter(model, self.get_session)
+            return await handler._handle_update(request, session)
+
+        @router.post("/internal/rewrite", response_model=InternalMutationResponse)
+        async def internal_rewrite(
+            request: InternalMutationRequest,
+            session: AsyncSession = Depends(self.get_session),
+        ) -> InternalMutationResponse:
+            model = self._get_model(request.entity)
+            handler = InternalRouter(model, self.get_session)
+            return await handler._handle_rewrite(request, session)
+
+        @router.post("/internal/delete", response_model=InternalMutationResponse)
+        async def internal_delete(
+            request: InternalMutationRequest,
+            session: AsyncSession = Depends(self.get_session),
+        ) -> InternalMutationResponse:
+            model = self._get_model(request.entity)
+            handler = InternalRouter(model, self.get_session)
+            return await handler._handle_delete(request, session)
+
+        return router
+
+
+def create_unified_internal_router(
+    entity_map: dict[str, type[ModelT]],
+    get_session: Callable[[], AsyncSession],
+) -> APIRouter:
+    """
+    Create a unified internal API router for multiple entities.
+
+    This creates /internal/* endpoints at the root level that handle
+    all entities specified in entity_map based on the 'entity' field
+    in the request body.
+
+    Args:
+        entity_map: Dict mapping entity names to SQLAlchemy models
+        get_session: Dependency that returns AsyncSession
+
+    Returns:
+        FastAPI router with unified internal CRUD endpoints
+
+    Example:
+        router = create_unified_internal_router(
+            entity_map={"Person": Person, "Contact": Contact},
+            get_session=get_session,
+        )
+        app.include_router(router)
+    """
+    factory = UnifiedInternalRouter(entity_map, get_session)
+    return factory.create_router()

@@ -25,6 +25,7 @@ class FieldDef:
     type: str  # int, string, bool, datetime, json, int?, string?
     filters: list[str] = field(default_factory=list)  # eq, in, icontains, gte, lte, isnull
     sortable: bool = False
+    nullable: bool = True  # whether field can be null (False = required)
 
 
 @dataclass

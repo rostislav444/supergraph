@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-900 text-gray-100;
+}
+
+.json-key {
+  @apply text-purple-400;
+}
+
+.json-string {
+  @apply text-green-400;
+}
+
+.json-number {
+  @apply text-yellow-400;
+}
+
+.json-boolean {
+  @apply text-blue-400;
+}
+
+.json-null {
+  @apply text-gray-500;
+}

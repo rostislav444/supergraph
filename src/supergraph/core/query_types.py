@@ -104,6 +104,7 @@ class InternalQueryRequest(BaseModel):
 
     POST /internal/query
     """
+    entity: Optional[str] = None  # Entity name (optional for backwards compatibility)
     filters: list[NormalizedFilter]
     fields: list[str]
     order: list[NormalizedOrder] = Field(default_factory=list)
@@ -141,8 +142,10 @@ class InternalMutationRequest(BaseModel):
     POST /internal/update
     POST /internal/rewrite
     DELETE /internal/delete
+    POST /internal/get_or_create
     """
-    operation: Literal["create", "update", "rewrite", "delete"]
+    entity: str  # Entity name (e.g., "Person", "Contact")
+    operation: Literal["create", "update", "rewrite", "delete", "get_or_create"]
     data: dict[str, Any] = Field(default_factory=dict)
     filters: list[NormalizedFilter] = Field(default_factory=list)  # For update/rewrite/delete
     response: Optional[List[str]] = None  # Fields to return
@@ -163,7 +166,7 @@ class InternalMutationResponse(BaseModel):
 class MutationResult(BaseModel):
     """Result of a single mutation operation."""
     entity: str
-    operation: Literal["create", "update", "rewrite", "delete"]
+    operation: Literal["create", "update", "rewrite", "delete", "get_or_create"]
     success: bool
     data: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None
     error: Optional[str] = None

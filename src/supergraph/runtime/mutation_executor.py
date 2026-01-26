@@ -159,13 +159,13 @@ class MutationExecutor:
         """
         try:
             base_url = self.get_service_url(entity)
-            resource = self.get_resource_path(entity)
 
             # Get primary key field
             entity_def = self.graph["entities"][entity]
-            key_field = entity_def["keys"][0] if entity_def["keys"] else "id"
+            key_field = entity_def["keys"][0] if entity_def.get("keys") else "id"
 
             request = InternalMutationRequest(
+                entity=entity,
                 operation="delete",
                 filters=[NormalizedFilter(field=key_field, op="eq", value=record_id)],
             )

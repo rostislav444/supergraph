@@ -40,7 +40,7 @@ from __future__ import annotations
 
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -139,9 +139,9 @@ async def execute_request(
     """
     body = await request.json()
 
-    # Parse request
+    # Parse request (pass graph for nested mutation compilation)
     known_entities = set(graph.get("entities", {}).keys())
-    parser = RequestParser(known_entities)
+    parser = RequestParser(known_entities, graph=graph)
 
     try:
         parsed = parser.parse(body)

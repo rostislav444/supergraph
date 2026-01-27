@@ -14,6 +14,7 @@ export interface Relation {
     from_field: string
     to_entity?: string
   }
+  through?: string
 }
 
 export interface Entity {

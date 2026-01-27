@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { Panel, PanelGroup } from 'react-resizable-panels'
 import clsx from 'clsx'
 
@@ -14,7 +15,7 @@ import FormEditor from './components/FormEditor'
 
 // Atoms & Molecules
 import { ResizeHandle } from '@atoms/ResizeHandle'
-import { OperationModeDropdown, ViewDropdown } from '@molecules/dropdowns'
+import { OperationModeDropdown } from '@molecules/dropdowns'
 
 // Store
 import { useAppDispatch, useAppSelector } from '@store/index'
@@ -39,8 +40,13 @@ import { extractEntityNames } from '@utils/queryParser'
 // Types
 import type { OperationMode } from '@/types'
 
-export default function App() {
+type SchemaViewMode = 'graph' | 'hcl' | 'json'
+
+function AppContent() {
   const dispatch = useAppDispatch()
+  const navigate = useNavigate()
+  const location = useLocation()
+
   const connected = useAppSelector(selectConnected)
   const graph = useAppSelector(selectGraph)
   const documentation = useAppSelector(selectDocumentation)
@@ -50,15 +56,21 @@ export default function App() {
   const rootEntity = useAppSelector(selectRootEntity)
   const selectedFields = useAppSelector(selectSelectedFields)
 
-  const [activeTab, setActiveTab] = useState<'explorer' | 'schema'>('explorer')
-  const [viewMode, setViewMode] = useState<'json' | 'html'>('json')
+  const [resultViewMode, setResultViewMode] = useState<'json' | 'html'>('json')
+
+  // Determine current view from URL
+  const isSchemaPage = location.pathname.startsWith('/schema')
+  const schemaViewMode: SchemaViewMode = location.pathname === '/schema/hcl'
+    ? 'hcl'
+    : location.pathname === '/schema/json'
+      ? 'json'
+      : 'graph'
 
   useEffect(() => {
     dispatch(fetchGraph())
   }, [dispatch])
 
   const handleExecute = useCallback(() => {
-    // Build column definitions from schema for display isolation
     const columnDefinitions: Record<string, { type: string; enum_values?: string[]; nullable?: boolean }> = {}
     if (rootEntity && graph?.entities?.[rootEntity]) {
       const entityDef = graph.entities[rootEntity]
@@ -76,7 +88,6 @@ export default function App() {
       }
     }
 
-    // Capture snapshot BEFORE executing query (isolates builder from display)
     dispatch(
       captureSnapshot({
         entity: rootEntity,
@@ -85,11 +96,26 @@ export default function App() {
       })
     )
 
-    // Execute query
     dispatch(executeQuery(queryText))
   }, [dispatch, queryText, rootEntity, selectedFields, graph])
 
   const entities = extractEntityNames(queryText)
+
+  const handleViewChange = (view: 'explorer' | 'schema') => {
+    if (view === 'schema') {
+      navigate('/schema')
+    } else {
+      navigate('/')
+    }
+  }
+
+  const handleSchemaViewChange = (mode: SchemaViewMode) => {
+    if (mode === 'graph') {
+      navigate('/schema')
+    } else {
+      navigate(`/schema/${mode}`)
+    }
+  }
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white">
@@ -116,8 +142,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Center: Query Mode + Entity + JSON/HTML */}
-          {activeTab === 'explorer' && (
+          {/* Center: Query Mode + Entity + JSON/HTML (for explorer) OR Schema view tabs */}
+          {!isSchemaPage ? (
             <div className="absolute left-1/2 -translate-x-1/2 flex items-center bg-gray-800 rounded-lg p-0.5 z-20">
               <OperationModeDropdown
                 value={operationMode}
@@ -129,30 +155,87 @@ export default function App() {
               )}
               <div className="w-px h-4 bg-gray-600 mx-2" />
               <button
-                onClick={() => setViewMode('json')}
+                onClick={() => setResultViewMode('json')}
                 className={clsx(
                   'px-3 py-1 text-sm font-medium rounded-md transition-all',
-                  viewMode === 'json' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                  resultViewMode === 'json' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
                 )}
               >
                 JSON
               </button>
               <button
-                onClick={() => setViewMode('html')}
+                onClick={() => setResultViewMode('html')}
                 className={clsx(
                   'px-3 py-1 text-sm font-medium rounded-md transition-all',
-                  viewMode === 'html' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                  resultViewMode === 'html' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
                 )}
               >
                 HTML
               </button>
             </div>
+          ) : (
+            <div className="absolute left-1/2 -translate-x-1/2 flex items-center bg-gray-800 rounded-lg p-0.5 z-20">
+              <button
+                onClick={() => handleSchemaViewChange('graph')}
+                className={clsx(
+                  'px-3 py-1 text-sm font-medium rounded-md transition-all flex items-center gap-1.5',
+                  schemaViewMode === 'graph' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                )}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
+                  />
+                </svg>
+                Graph
+              </button>
+              <button
+                onClick={() => handleSchemaViewChange('hcl')}
+                className={clsx(
+                  'px-3 py-1 text-sm font-medium rounded-md transition-all',
+                  schemaViewMode === 'hcl' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                )}
+              >
+                HCL
+              </button>
+              <button
+                onClick={() => handleSchemaViewChange('json')}
+                className={clsx(
+                  'px-3 py-1 text-sm font-medium rounded-md transition-all',
+                  schemaViewMode === 'json' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                )}
+              >
+                JSON
+              </button>
+            </div>
           )}
 
-          {/* Right: Explorer + Execute */}
+          {/* Right: View Toggle + Execute */}
           <div className="flex items-center gap-3">
-            <ViewDropdown value={activeTab} onChange={(id) => setActiveTab(id as 'explorer' | 'schema')} />
-            {activeTab === 'explorer' && (
+            <div className="flex bg-gray-800 rounded-lg p-0.5">
+              <button
+                onClick={() => handleViewChange('explorer')}
+                className={clsx(
+                  'px-3 py-1 text-sm font-medium rounded-md transition-all',
+                  !isSchemaPage ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                )}
+              >
+                Explorer
+              </button>
+              <button
+                onClick={() => handleViewChange('schema')}
+                className={clsx(
+                  'px-3 py-1 text-sm font-medium rounded-md transition-all',
+                  isSchemaPage ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                )}
+              >
+                Schema
+              </button>
+            </div>
+            {!isSchemaPage && (
               <button
                 onClick={handleExecute}
                 disabled={loading}
@@ -194,50 +277,59 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden">
-        {activeTab === 'explorer' ? (
-          <PanelGroup direction="horizontal" className="h-full" key={viewMode}>
-            {/* Left Panel - Schema Explorer / Query Builder */}
-            <Panel id="schema-explorer" order={1} defaultSize={25} minSize={15} maxSize={40}>
-              <SchemaExplorer />
-            </Panel>
-
-            <ResizeHandle />
-
-            {viewMode === 'json' ? (
-              <>
-                {/* Center Panel - Query Editor */}
-                <Panel id="query-editor" order={2} defaultSize={documentation ? 35 : 45} minSize={25}>
-                  <MonacoEditor />
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <PanelGroup direction="horizontal" className="h-full" key={resultViewMode}>
+                <Panel id="schema-explorer" order={1} defaultSize={25} minSize={15} maxSize={40}>
+                  <SchemaExplorer />
                 </Panel>
 
                 <ResizeHandle />
 
-                {/* Right Panel - Results */}
-                <Panel id="results" order={3} defaultSize={documentation ? 25 : 30} minSize={20}>
-                  <ResultViewer />
-                </Panel>
-
-                {/* Documentation Panel (conditional) */}
-                {documentation && (
+                {resultViewMode === 'json' ? (
                   <>
-                    <ResizeHandle />
-                    <Panel id="documentation" order={4} defaultSize={15} minSize={15} maxSize={30}>
-                      <DocumentationPanel />
+                    <Panel id="query-editor" order={2} defaultSize={documentation ? 35 : 45} minSize={25}>
+                      <MonacoEditor />
                     </Panel>
+
+                    <ResizeHandle />
+
+                    <Panel id="results" order={3} defaultSize={documentation ? 25 : 30} minSize={20}>
+                      <ResultViewer />
+                    </Panel>
+
+                    {documentation && (
+                      <>
+                        <ResizeHandle />
+                        <Panel id="documentation" order={4} defaultSize={15} minSize={15} maxSize={30}>
+                          <DocumentationPanel />
+                        </Panel>
+                      </>
+                    )}
                   </>
+                ) : (
+                  <Panel id="html-editor" order={2} defaultSize={75} minSize={50}>
+                    <FormEditor layout="vertical" />
+                  </Panel>
                 )}
-              </>
-            ) : (
-              /* HTML Mode - vertical layout for better table viewing */
-              <Panel id="html-editor" order={2} defaultSize={75} minSize={50}>
-                <FormEditor layout="vertical" />
-              </Panel>
-            )}
-          </PanelGroup>
-        ) : (
-          <SchemaView graph={graph} />
-        )}
+              </PanelGroup>
+            }
+          />
+          <Route path="/schema" element={<SchemaView graph={graph} viewMode="graph" />} />
+          <Route path="/schema/hcl" element={<SchemaView graph={graph} viewMode="hcl" />} />
+          <Route path="/schema/json" element={<SchemaView graph={graph} viewMode="json" />} />
+        </Routes>
       </main>
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   )
 }

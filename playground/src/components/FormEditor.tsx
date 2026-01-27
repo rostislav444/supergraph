@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'

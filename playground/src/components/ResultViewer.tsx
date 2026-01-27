@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useMemo, useState, useCallback } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import clsx from 'clsx'

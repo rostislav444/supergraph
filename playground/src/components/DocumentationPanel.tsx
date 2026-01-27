@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useSelector, useDispatch } from 'react-redux'
 import clsx from 'clsx'
 import { selectDocumentation, clearDocumentation } from '../store/builderSlice'

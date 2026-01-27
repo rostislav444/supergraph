@@ -2,15 +2,19 @@ import { useEffect, useState, useCallback } from 'react'
 import { Panel, PanelGroup } from 'react-resizable-panels'
 import clsx from 'clsx'
 
-// Components
-import SchemaExplorer from './components/SchemaExplorer'
+// Components - New TypeScript organisms
+import { SchemaExplorer } from '@organisms/SchemaExplorer'
+import { SchemaView } from '@organisms/SchemaView'
+
+// Components - Legacy JSX (to be converted)
 import MonacoEditor from './components/MonacoEditor'
 import ResultViewer from './components/ResultViewer'
 import DocumentationPanel from './components/DocumentationPanel'
 import FormEditor from './components/FormEditor'
+
+// Atoms & Molecules
 import { ResizeHandle } from '@atoms/ResizeHandle'
 import { OperationModeDropdown, ViewDropdown } from '@molecules/dropdowns'
-import { SchemaView } from '@organisms/SchemaView'
 
 // Store
 import { useAppDispatch, useAppSelector } from '@store/index'

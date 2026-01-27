@@ -18,3 +18,6 @@ export type { TruncatedTextProps } from './TruncatedText'
 
 export { ResizeHandle, VerticalResizeHandle } from './ResizeHandle'
 export type { ResizeHandleProps } from './ResizeHandle'
+
+export { Toast } from './Toast'
+export type { ToastProps } from './Toast'

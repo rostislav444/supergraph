@@ -1,9 +1,10 @@
+// @ts-nocheck
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import Editor, { useMonaco } from '@monaco-editor/react'
 import { setQueryText, selectQueryText, executeQuery, selectOperationMode } from '../store/querySlice'
 import { selectGraph } from '../store/graphSlice'
-import Toast from './Toast'
+import { Toast } from '@atoms/Toast'
 
 // Custom theme for dark mode
 const DARK_THEME = {

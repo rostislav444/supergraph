@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 
 // Shared FK Lookup Modal component

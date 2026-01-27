@@ -4,7 +4,7 @@ import type { Field } from '@/types'
 export interface FilterSectionProps {
   path: string
   fields: Array<[string, Field]>
-  filters: Record<string, string>
+  filters: Record<string, string | number>
   onSetFilter: (data: { path: string; field: string; op: string; value: string }) => void
 }
 

@@ -12,7 +12,7 @@ export interface RelationItemProps {
   graph: Graph
   selectedFields: Record<string, string[]>
   expandedPaths: Record<string, boolean>
-  filters: Record<string, Record<string, string>>
+  filters: Record<string, Record<string, string | number>>
   pagination: Record<string, PaginationData | undefined>
   onToggleExpand: (path: string) => void
   onToggleField: (path: string, field: string) => void

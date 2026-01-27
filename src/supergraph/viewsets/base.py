@@ -174,6 +174,56 @@ def get_column_type(column) -> tuple[str, list[str] | None]:
         return "string", None
 
 
+def table_name_to_entity_name(table_name: str) -> str:
+    """
+    Convert snake_case table name to PascalCase entity name.
+    Also handles plural table names by converting to singular.
+
+    Examples:
+        "person" -> "Person"
+        "persons" -> "Person"
+        "camera_event" -> "CameraEvent"
+        "camera_events" -> "CameraEvent"
+        "ftp_journal_entry" -> "FtpJournalEntry"
+        "property_types" -> "PropertyType"
+        "floor_plans" -> "FloorPlan" -> "Plan" (special case)
+        "properties" -> "Property"
+        "entries" -> "Entry"
+    """
+    # Special table name mappings (table_name -> entity_name)
+    SPECIAL_MAPPINGS = {
+        "floor_plans": "Plan",
+        "property_types": "PropertyType",
+        "geo_objects": "GeoObject",
+        "camera_brands": "CameraBrand",
+        "camera_models": "CameraModel",
+    }
+
+    if table_name in SPECIAL_MAPPINGS:
+        return SPECIAL_MAPPINGS[table_name]
+
+    # Convert to PascalCase
+    words = table_name.split("_")
+
+    # Handle last word plural -> singular
+    last_word = words[-1]
+    if last_word.endswith("ies"):
+        # entries -> entry, properties -> property
+        words[-1] = last_word[:-3] + "y"
+    elif last_word.endswith("es") and not last_word.endswith("ses"):
+        # Not for "ses" endings like "addresses"
+        # boxes -> box, matches -> match
+        if last_word.endswith("xes") or last_word.endswith("ches") or last_word.endswith("shes"):
+            words[-1] = last_word[:-2]
+        else:
+            words[-1] = last_word[:-1]  # types -> type (actually just remove 's')
+    elif last_word.endswith("s") and len(last_word) > 1:
+        # persons -> person, events -> event
+        words[-1] = last_word[:-1]
+
+    return "".join(word.capitalize() for word in words)
+
+
 def introspect_model_fields(
     model: type[DeclarativeBase],
     fields_include: Optional[List[str]] = None,
@@ -185,6 +235,7 @@ def introspect_model_fields(
     Auto-discover fields from SQLAlchemy model.
 
     Returns dict of field definitions ready for GraphJSON.
+    Includes foreign key information when present.
     """
     fields_exclude = fields_exclude or []
     filter_overrides = filter_overrides or {}
@@ -235,6 +286,20 @@ def introspect_model_fields(
         # Add enum values if present
         if enum_values is not None:
             field_def["enum_values"] = enum_values
+
+        # Check for foreign key and extract target entity
+        if column.foreign_keys:
+            for fk in column.foreign_keys:
+                # fk.target_fullname is like "person.id" or "camera_event.id"
+                target_table = fk.column.table.name
+                target_column = fk.column.name
+                target_entity = table_name_to_entity_name(target_table)
+
+                field_def["fk"] = {
+                    "target_entity": target_entity,
+                    "target_field": target_column,
+                }
+                break  # Only take the first FK if multiple (rare case)
 
         result[field_name] = field_def
 

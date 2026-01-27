@@ -11,6 +11,7 @@ import {
   Position,
   useReactFlow,
   ReactFlowProvider,
+  Handle,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { Graph, Relation } from '@/types'
@@ -40,6 +41,25 @@ const NODE_GAP_Y = 30
 const GROUP_GAP = 80
 const GROUP_PADDING = 30
 
+// Field type colors
+const TYPE_COLORS: Record<string, string> = {
+  int: '#ef4444',      // red
+  string: '#22c55e',   // green
+  json: '#60a5fa',     // light blue
+  bool: '#ec4899',     // pink
+  float: '#3b82f6',    // blue
+  datetime: '#06b6d4', // cyan
+  date: '#67e8f9',     // cyan light
+  enum: '#f97316',     // orange
+  text: '#34d399',     // emerald (similar to string)
+  uuid: '#a78bfa',     // violet
+  decimal: '#2dd4bf',  // teal
+}
+
+function getTypeColor(type: string): string {
+  return TYPE_COLORS[type.toLowerCase()] || '#9ca3af' // gray fallback
+}
+
 // Calculate node height based on number of fields
 function calculateNodeHeight(fieldCount: number): number {
   return NODE_HEADER_HEIGHT + NODE_PADDING + fieldCount * FIELD_HEIGHT
@@ -58,7 +78,7 @@ function EntityNode({
 }) {
   return (
     <div
-      className="rounded-lg shadow-xl"
+      className="rounded-lg shadow-xl relative"
       style={{
         backgroundColor: '#1f2937',
         border: `2px solid ${data.color.border}`,
@@ -75,21 +95,58 @@ function EntityNode({
       </div>
       {/* Fields - show all fields without scrolling */}
       <div className="px-2 py-1.5">
-        {data.fields.map((field) => (
+        {data.fields.map((field, index) => (
           <div
             key={field.name}
-            className="text-[10px] py-0.5 font-mono flex items-center gap-1"
+            className="text-[10px] py-0.5 font-mono flex items-center gap-1 relative"
             style={{ height: FIELD_HEIGHT }}
           >
+            {/* Target handle for 'id' field - receives FK connections */}
+            {field.name === 'id' && (
+              <Handle
+                type="target"
+                position={Position.Left}
+                id={`field-id`}
+                style={{
+                  background: '#ef4444',
+                  width: 6,
+                  height: 6,
+                  left: -14,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                }}
+              />
+            )}
+            {/* Source handle for FK fields - sends connections */}
+            {field.isFk && (
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={`field-${field.name}`}
+                style={{
+                  background: '#fbbf24',
+                  width: 6,
+                  height: 6,
+                  right: -14,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                }}
+              />
+            )}
             {field.isFk && (
               <span className="text-amber-400 text-[8px]" title={`FK → ${field.fkTarget}`}>
                 🔑
               </span>
             )}
-            <span className={field.isFk ? 'text-amber-300' : 'text-gray-400'}>
+            <span style={{ color: field.isFk ? '#fbbf24' : '#9ca3af' }}>
               {field.name}
             </span>
-            <span className="text-gray-600 text-[9px] ml-auto">{field.type}</span>
+            <span
+              className="text-[9px] ml-auto font-semibold"
+              style={{ color: field.isFk ? '#fbbf24' : getTypeColor(field.type) }}
+            >
+              {field.type}
+            </span>
           </div>
         ))}
       </div>
@@ -292,14 +349,21 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         let isFk = false
         let fkTarget = ''
 
-        const relations = entity.relations || {}
-        Object.entries(relations).forEach(([, rel]) => {
-          const relation = rel as Relation
-          if (relation.ref?.from_field === fieldName) {
-            isFk = true
-            fkTarget = relation.target
-          }
-        })
+        // Check if field has FK info from backend
+        if (field.fk) {
+          isFk = true
+          fkTarget = field.fk.target_entity
+        } else {
+          // Fallback: check explicit relations
+          const relations = entity.relations || {}
+          Object.entries(relations).forEach(([, rel]) => {
+            const relation = rel as Relation
+            if (relation.ref?.from_field === fieldName) {
+              isFk = true
+              fkTarget = relation.target
+            }
+          })
+        }
 
         fieldsWithFk.push({
           name: fieldName,
@@ -331,7 +395,7 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         zIndex: 1,
       })
 
-      // Create edges for relations
+      // Create edges for explicit relations
       const relations = entity.relations || {}
       Object.entries(relations).forEach(([relName, relation]) => {
         const rel = relation as Relation
@@ -376,6 +440,65 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
           style: {
             stroke: strokeColor,
             strokeWidth,
+            strokeDasharray,
+          },
+          labelStyle: {
+            fill: '#9ca3af',
+            fontSize: 9,
+            fontWeight: 500,
+          },
+          labelBgStyle: {
+            fill: '#111827',
+            fillOpacity: 0.9,
+          },
+          labelBgPadding: [4, 2] as [number, number],
+          labelBgBorderRadius: 4,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: strokeColor,
+            width: 15,
+            height: 15,
+          },
+          zIndex: 0,
+        })
+
+        edgeSet.add(edgeId)
+        edgeSet.add(reverseEdgeId)
+      })
+
+      // Create edges for FK relationships (from backend fk info)
+      fieldsWithFk.forEach((field) => {
+        if (!field.isFk || !field.fkTarget) return
+
+        // Check if this FK edge already exists (from explicit relations)
+        const edgeId = `${name}-${field.fkTarget}`
+        const reverseEdgeId = `${field.fkTarget}-${name}`
+
+        if (edgeSet.has(edgeId)) return
+
+        const targetEntity = graph.entities[field.fkTarget]
+        if (!targetEntity) return
+
+        const isCrossService = targetEntity.service !== service
+        let strokeColor = '#8b5cf6' // Purple for FK
+        let strokeDasharray: string | undefined
+
+        if (isCrossService) {
+          strokeColor = '#f59e0b' // Orange for cross-service
+          strokeDasharray = '8,4'
+        }
+
+        edges.push({
+          id: `${name}-fk-${field.name}-${field.fkTarget}`,
+          source: name,
+          sourceHandle: `field-${field.name}`,
+          target: field.fkTarget,
+          targetHandle: 'field-id',
+          type: 'smoothstep',
+          animated: false,
+          style: {
+            stroke: strokeColor,
+            strokeWidth: 2,
             strokeDasharray,
           },
           labelStyle: {

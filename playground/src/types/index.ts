@@ -5,6 +5,10 @@ export interface Field {
   required?: boolean
   enum_values?: string[]
   filters?: string[]
+  fk?: {
+    target_entity: string
+    target_field: string
+  }
 }
 
 export interface Relation {

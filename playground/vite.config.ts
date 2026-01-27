@@ -8,6 +8,21 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+        '@components': path.resolve(__dirname, './src/components'),
+        '@atoms': path.resolve(__dirname, './src/components/atoms'),
+        '@molecules': path.resolve(__dirname, './src/components/molecules'),
+        '@organisms': path.resolve(__dirname, './src/components/organisms'),
+        '@templates': path.resolve(__dirname, './src/components/templates'),
+        '@hooks': path.resolve(__dirname, './src/hooks'),
+        '@store': path.resolve(__dirname, './src/store'),
+        '@utils': path.resolve(__dirname, './src/utils'),
+        '@constants': path.resolve(__dirname, './src/constants'),
+        '@types': path.resolve(__dirname, './src/types'),
+      },
+    },
     build: {
       outDir: path.resolve(__dirname, '../src/supergraph/playground/dist'),
       emptyOutDir: true,

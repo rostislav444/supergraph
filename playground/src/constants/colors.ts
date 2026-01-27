@@ -1,4 +1,4 @@
-import type { ColorConfig } from '@types/index'
+import type { ColorConfig } from '@/types'
 
 // Entity colors for visual distinction (used in FormEditor, TransactionBuilder)
 export const ENTITY_COLORS: ColorConfig[] = [

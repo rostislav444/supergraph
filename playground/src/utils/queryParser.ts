@@ -1,4 +1,4 @@
-import type { OperationMode } from '@types/index'
+import type { OperationMode } from '@/types'
 
 export interface ParsedMutationContent {
   entityName: string

@@ -1,4 +1,4 @@
-import type { Field } from '@types/index'
+import type { Field } from '@/types'
 import {
   TEST_FIRST_NAMES,
   TEST_LAST_NAMES,

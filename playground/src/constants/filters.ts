@@ -1,4 +1,4 @@
-import type { StepOperation } from '@types/index'
+import type { StepOperation } from '@/types'
 
 // Filter modes for table columns
 export const FILTER_MODES = {

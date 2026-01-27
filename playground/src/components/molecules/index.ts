@@ -19,3 +19,15 @@ export { RelationItem, type RelationItemProps } from './RelationItem'
 
 // Navigation components
 export { PaginationControls, type PaginationControlsProps } from './PaginationControls'
+
+// Dropdown components
+export {
+  OperationModeDropdown,
+  type OperationModeDropdownProps,
+  type OperationModeOption,
+  ViewDropdown,
+  type ViewDropdownProps,
+  type ViewOption,
+  useDropdown,
+  type UseDropdownReturn,
+} from './dropdowns'

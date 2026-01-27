@@ -34,12 +34,12 @@ export const MODE_DOT_COLORS: Record<string, string> = {
 
 // Mode hover colors
 export const MODE_HOVER_COLORS: Record<string, string> = {
-  query: 'hover:bg-blue-600/40',
-  create: 'hover:bg-green-600/40',
-  update: 'hover:bg-yellow-600/40',
-  rewrite: 'hover:bg-orange-600/40',
-  delete: 'hover:bg-red-600/40',
-  transaction: 'hover:bg-purple-600/40',
+  query: 'hover:bg-blue-600/20',
+  create: 'hover:bg-green-600/20',
+  update: 'hover:bg-yellow-600/20',
+  rewrite: 'hover:bg-orange-600/20',
+  delete: 'hover:bg-red-600/20',
+  transaction: 'hover:bg-purple-600/20',
 }
 
 // Execute button colors

@@ -66,11 +66,19 @@ export function parseEditorContent(text: string, operationMode: OperationMode): 
 }
 
 // Extract entity names from query text (for highlighting in Monaco)
-export function extractEntityNames(queryText: string, knownEntities: string[]): string[] {
+export function extractEntityNames(queryText: string, knownEntities?: string[]): string[] {
   try {
     const parsed = JSON.parse(queryText)
+    if (typeof parsed !== 'object' || parsed === null) return []
     const keys = Object.keys(parsed)
-    return keys.filter(k => knownEntities.includes(k) || (k[0] === k[0].toUpperCase() && k[0] !== k[0].toLowerCase()))
+    // If knownEntities provided, filter by them. Otherwise, check if key starts with uppercase letter.
+    return keys.filter(k => {
+      if (knownEntities) {
+        return knownEntities.includes(k) || (k[0] === k[0].toUpperCase() && k[0] !== k[0].toLowerCase())
+      }
+      // Without knownEntities, just check for capitalized keys (entity names start with uppercase)
+      return /^[A-Z]/.test(k)
+    })
   } catch {
     return []
   }

@@ -56,3 +56,29 @@ export interface StepOperation {
   label: string
   color: string
 }
+
+// Transaction types
+export interface TransactionStepData {
+  data?: Record<string, unknown>
+  response?: string[]
+  id?: number
+}
+
+export interface TransactionStep {
+  create?: Record<string, TransactionStepData>
+  update?: Record<string, TransactionStepData>
+  delete?: Record<string, TransactionStepData>
+  get_or_create?: Record<string, TransactionStepData>
+  as?: string
+}
+
+export interface Transaction {
+  steps: TransactionStep[]
+  on_error: 'rollback' | 'stop' | 'continue'
+}
+
+// Builder state types
+export interface BuilderPagination {
+  limit?: number | null
+  offset?: number | null
+}

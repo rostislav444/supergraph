@@ -83,6 +83,9 @@ class Gateway:
         # Create FastAPI app
         self.app = self._create_app()
 
+        # Store reference to gateway on app for refresh endpoint
+        self.app.state.gateway = self
+
     def _default_hcl_path(self) -> str:
         """Get default HCL output path."""
         # Try to find the caller's directory
@@ -203,6 +206,25 @@ class Gateway:
         except Exception as e:
             print(f"Warning: Could not save HCL: {e}")
 
+    async def refresh_schema(self) -> dict[str, Any]:
+        """
+        Refresh schema by re-discovering from all services.
+        Returns the new graph and updates internal state.
+        """
+        print("Refreshing supergraph schema...")
+        new_graph = await self._discover_schemas()
+
+        # Check if we got entities
+        entity_count = len(new_graph.get("entities", {}))
+        if entity_count > 0:
+            self.graph = new_graph
+            self._save_hcl()
+            print(f"Schema refreshed: {entity_count} entities")
+            return {"status": "ok", "entities": entity_count}
+        else:
+            print("Warning: Refresh returned no entities, keeping old schema")
+            return {"status": "warning", "message": "No entities found, keeping old schema"}
+
     def _create_app(self) -> FastAPI:
         """Create FastAPI application."""
         app = FastAPI(
@@ -233,6 +255,29 @@ class Gateway:
         @app.get("/__graph.hcl", response_class=PlainTextResponse)
         async def graph_hcl():
             return to_hcl(self.graph)
+
+        # Schema refresh endpoint
+        @app.post("/__refresh")
+        async def refresh_schema():
+            """
+            Manually refresh the supergraph schema by re-discovering from all services.
+            Use this after services restart or when schema changes.
+            """
+            gateway = app.state.gateway
+            result = await gateway.refresh_schema()
+            return result
+
+        # Also expose current schema info
+        @app.get("/__status")
+        async def schema_status():
+            """Get current schema status."""
+            entity_count = len(self.graph.get("entities", {}))
+            service_count = len(self.graph.get("services", {}))
+            return {
+                "entities": entity_count,
+                "services": service_count,
+                "version": self.graph.get("version", 1),
+            }
 
         # WebSocket subscriptions (auto-discovered)
         if self.graph.get("websockets") and self.redis_url:

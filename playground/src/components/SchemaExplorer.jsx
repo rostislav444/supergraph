@@ -1,6 +1,7 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import clsx from 'clsx'
+import FkLookupModal from './FkLookupModal'
 import {
   selectGraph,
   selectEntities,
@@ -333,294 +334,6 @@ function inferTargetEntity(fieldName, currentEntity, allEntities) {
   return null
 }
 
-// Entity Lookup Modal Component
-function EntityLookupModal({ isOpen, onClose, onSelect, targetEntity, graph }) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [results, setResults] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState(null)
-  const [offset, setOffset] = useState(0)
-  const [hasMore, setHasMore] = useState(true)
-  const inputRef = useRef(null)
-  const LIMIT = 50
-
-  // Get entity definition
-  const entityDef = graph?.entities?.[targetEntity]
-  const displayFields = useMemo(() => {
-    if (!entityDef?.fields) return ['id', 'name']
-    const fields = Object.keys(entityDef.fields)
-    // Prioritize: id, name, title, code, then first few string fields
-    const priority = ['id', 'name', 'title', 'code', 'first_name', 'last_name']
-    const sorted = [...priority.filter(f => fields.includes(f))]
-    // Add first string field not already included
-    for (const f of fields) {
-      if (!sorted.includes(f) && entityDef.fields[f].type === 'string' && sorted.length < 4) {
-        sorted.push(f)
-      }
-    }
-    return sorted.length > 0 ? sorted : fields.slice(0, 4)
-  }, [entityDef])
-
-  // Focus input when modal opens
-  useEffect(() => {
-    if (isOpen && inputRef.current) {
-      inputRef.current.focus()
-    }
-  }, [isOpen])
-
-  // Fetch function
-  const fetchResults = useCallback(async (searchOffset = 0, append = false) => {
-    if (!targetEntity) return
-
-    if (append) {
-      setLoadingMore(true)
-    } else {
-      setLoading(true)
-      setOffset(0)
-    }
-    setError(null)
-
-    try {
-      // Build query
-      const query = {
-        [targetEntity]: {
-          fields: displayFields,
-          limit: LIMIT,
-          offset: searchOffset,
-        }
-      }
-
-      // Add search filter if query provided
-      if (searchQuery.trim()) {
-        const filters = {}
-        const trimmed = searchQuery.trim()
-
-        // If purely numeric, search by ID
-        if (/^\d+$/.test(trimmed)) {
-          filters['id__eq'] = parseInt(trimmed)
-        } else {
-          // Otherwise search by name or similar field
-          const searchableFields = ['name', 'title', 'code', 'first_name', 'last_name']
-          const searchField = searchableFields.find(f => entityDef?.fields?.[f])
-          if (searchField) {
-            filters[`${searchField}__icontains`] = trimmed
-          }
-        }
-
-        if (Object.keys(filters).length > 0) {
-          query[targetEntity].filters = filters
-        }
-      }
-
-      const response = await fetch('/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query)
-      })
-
-      const data = await response.json()
-
-      if (data.error || data.detail) {
-        throw new Error(data.detail?.message || data.error || 'Query failed')
-      }
-
-      // Response format: {"data": {"items": [...], "pagination": {...}}}
-      const rawResults = data.data?.items || data.data || []
-      const newResults = Array.isArray(rawResults) ? rawResults : []
-      setHasMore(newResults.length === LIMIT)
-
-      if (append) {
-        setResults(prev => [...(Array.isArray(prev) ? prev : []), ...newResults])
-        setOffset(searchOffset)
-      } else {
-        setResults(newResults)
-        setOffset(0)
-      }
-    } catch (err) {
-      setError(err.message)
-      if (!append) setResults([])
-    } finally {
-      setLoading(false)
-      setLoadingMore(false)
-    }
-  }, [targetEntity, searchQuery, displayFields, entityDef, LIMIT])
-
-  // Load initial results when modal opens
-  useEffect(() => {
-    if (isOpen && targetEntity) {
-      setResults([])
-      setOffset(0)
-      setHasMore(true)
-      setSearchQuery('')
-      // Trigger initial fetch
-      const initialFetch = async () => {
-        setLoading(true)
-        setError(null)
-        try {
-          const query = {
-            [targetEntity]: {
-              fields: displayFields,
-              limit: LIMIT,
-              offset: 0,
-            }
-          }
-          const response = await fetch('/query', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(query)
-          })
-          const data = await response.json()
-          if (data.error || data.detail) {
-            throw new Error(data.detail?.message || data.error || 'Query failed')
-          }
-          // Response format: {"data": {"items": [...], "pagination": {...}}}
-          const rawResults = data.data?.items || data.data || []
-          const newResults = Array.isArray(rawResults) ? rawResults : []
-          setHasMore(newResults.length === LIMIT)
-          setResults(newResults)
-        } catch (err) {
-          setError(err.message)
-          setResults([])
-        } finally {
-          setLoading(false)
-        }
-      }
-      initialFetch()
-    }
-  }, [isOpen, targetEntity, displayFields])
-
-  // Search when query changes (debounced)
-  useEffect(() => {
-    if (!isOpen || !targetEntity || searchQuery === '') return
-
-    const debounce = setTimeout(() => {
-      fetchResults(0, false)
-    }, 300)
-
-    return () => clearTimeout(debounce)
-  }, [searchQuery, isOpen, targetEntity, fetchResults])
-
-  // Load more function
-  const handleLoadMore = () => {
-    if (!loadingMore && hasMore) {
-      fetchResults(offset + LIMIT, true)
-    }
-  }
-
-  if (!isOpen) return null
-
-  // Get display value for a result
-  const getDisplayValue = (item) => {
-    const parts = []
-    for (const field of displayFields) {
-      if (item[field] !== undefined && item[field] !== null && item[field] !== '') {
-        parts.push(String(item[field]))
-      }
-    }
-    return parts.join(' • ') || `ID: ${item.id}`
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="bg-gray-800 rounded-lg shadow-xl border border-gray-600 w-full max-w-lg mx-4"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-white">Select {targetEntity}</h3>
-            <p className="text-xs text-gray-400">Search and select a record</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Search input */}
-        <div className="p-4 border-b border-gray-700">
-          <input
-            ref={inputRef}
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={`Search ${targetEntity}...`}
-            className="w-full bg-gray-700 text-sm px-3 py-2 rounded border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
-          />
-        </div>
-
-        {/* Results */}
-        <div className="max-h-96 overflow-auto">
-          {loading && (
-            <div className="p-4 text-center text-gray-400">
-              <div className="inline-block animate-spin w-5 h-5 border-2 border-gray-600 border-t-blue-500 rounded-full" />
-            </div>
-          )}
-
-          {error && (
-            <div className="p-4 text-center text-red-400 text-sm">{error}</div>
-          )}
-
-          {!loading && !error && Array.isArray(results) && results.length === 0 && (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              {searchQuery ? 'No results found' : 'No records found'}
-            </div>
-          )}
-
-          {!loading && Array.isArray(results) && results.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => { onSelect(item.id); onClose() }}
-              className="px-4 py-2 hover:bg-gray-700 cursor-pointer border-b border-gray-700/50 last:border-0"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-white">{getDisplayValue(item)}</span>
-                <span className="text-xs text-gray-500 font-mono">#{item.id}</span>
-              </div>
-            </div>
-          ))}
-
-          {/* Load more button */}
-          {!loading && hasMore && Array.isArray(results) && results.length > 0 && (
-            <div className="p-2 border-t border-gray-700/50">
-              <button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                className="w-full py-2 text-sm bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors disabled:opacity-50"
-              >
-                {loadingMore ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <div className="w-4 h-4 border-2 border-gray-500 border-t-blue-400 rounded-full animate-spin" />
-                    Loading...
-                  </span>
-                ) : (
-                  `Load more (showing ${results.length})`
-                )}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-4 py-3 border-t border-gray-700 flex items-center justify-between">
-          <span className="text-xs text-gray-500">
-            {Array.isArray(results) && results.length > 0 ? `${results.length} loaded` : ''}
-          </span>
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // Generate mutation template for entity
 function generateMutationTemplate(entityName, entity, operationMode) {
   const fields = entity?.fields || {}
@@ -832,8 +545,25 @@ function FieldItem({ name, field, path, selected, onToggle, required, disabled }
 }
 
 // Data field item with value editing (for create/update mode)
-function DataFieldItem({ name, field, selected, value, onToggle, onValueChange, required, disabled }) {
+function DataFieldItem({ name, field, selected, value, onToggle, onValueChange, required, disabled, graph, entityName }) {
   const isEnum = field.type === 'enum' && field.enum_values?.length > 0
+  const isFk = name.endsWith('_id')
+  const [showLookup, setShowLookup] = useState(false)
+
+  // Get target entity for FK lookup
+  const targetEntity = useMemo(() => {
+    if (!isFk || !graph?.entities) return null
+    const allEntities = Object.keys(graph.entities)
+    // First try to find from relations
+    const relations = graph.entities[entityName]?.relations || {}
+    for (const [, rel] of Object.entries(relations)) {
+      if (rel.ref?.from_field === name) {
+        return rel.target || rel.ref?.to_entity
+      }
+    }
+    // Fallback to infer from field name
+    return inferTargetEntity(name, entityName, allEntities)
+  }, [isFk, name, graph, entityName])
 
   return (
     <div
@@ -909,17 +639,30 @@ function DataFieldItem({ name, field, selected, value, onToggle, onValueChange, 
                 className="w-full bg-gray-700 text-xs h-5 px-1.5 rounded border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
               />
             ) : (
-              <input
-                type={field.type === 'int' ? 'number' : 'text'}
-                value={value ?? ''}
-                onChange={(e) => {
-                  const val = field.type === 'int' ? parseInt(e.target.value) || 0 : e.target.value
-                  onValueChange(val)
-                }}
-                onClick={(e) => e.stopPropagation()}
-                placeholder="..."
-                className="w-full bg-gray-700 text-xs h-5 px-1.5 rounded border border-gray-600 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-              />
+              <div className="flex gap-1">
+                <input
+                  type={field.type === 'int' ? 'number' : 'text'}
+                  value={value ?? ''}
+                  onChange={(e) => {
+                    const val = field.type === 'int' ? parseInt(e.target.value) || 0 : e.target.value
+                    onValueChange(val)
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  placeholder="..."
+                  className="flex-1 min-w-0 bg-gray-700 text-xs h-5 px-1.5 rounded border border-gray-600 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                />
+                {isFk && targetEntity && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowLookup(true) }}
+                    className="flex-shrink-0 w-5 h-5 flex items-center justify-center bg-gray-600 hover:bg-gray-500 rounded text-gray-300 hover:text-white"
+                    title={`Search ${targetEntity}`}
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             )}
           </>
         ) : (
@@ -931,6 +674,17 @@ function DataFieldItem({ name, field, selected, value, onToggle, onValueChange, 
       <div className="w-12 flex-shrink-0 text-right">
         <TypeBadge type={field.type} enumValues={field.enum_values} small />
       </div>
+
+      {/* FK Lookup Modal */}
+      {showLookup && (
+        <FkLookupModal
+          isOpen={showLookup}
+          onClose={() => setShowLookup(false)}
+          onSelect={(id) => { onValueChange(id); setShowLookup(false) }}
+          targetEntity={targetEntity}
+          graph={graph}
+        />
+      )}
     </div>
   )
 }
@@ -1152,6 +906,8 @@ function CreateModeBuilder({ entityName, entity, graph, queryText, onUpdateQuery
               onValueChange={(val) => handleValueChange(name, val)}
               required={isRequired}
               disabled={isRequired}
+              graph={graph}
+              entityName={entityName}
             />
           )
         })}
@@ -1844,7 +1600,7 @@ function TransactionStepCard({
 
       {/* Entity Lookup Modal for FK fields */}
       {lookupField && (
-        <EntityLookupModal
+        <FkLookupModal
           isOpen={true}
           onClose={() => setLookupField(null)}
           onSelect={(selectedId) => {
@@ -2227,7 +1983,12 @@ export default function SchemaExplorer() {
 
       if (pathFields.length > 0) selection.fields = pathFields
       if (Object.keys(pathFilters).length > 0) selection.filters = pathFilters
-      if (pathPagination.limit) selection.limit = pathPagination.limit
+      // Default limit 100 for root entity, explicit limit for others
+      if (pathPagination.limit) {
+        selection.limit = pathPagination.limit
+      } else if (path === entityName) {
+        selection.limit = 100 // Default limit for root
+      }
       if (pathPagination.offset) selection.offset = pathPagination.offset
 
       const nestedRelations = {}

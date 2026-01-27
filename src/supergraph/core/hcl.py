@@ -141,6 +141,14 @@ def to_hcl(graph: dict[str, Any]) -> str:
         lines.append(f'  service = "{entity["service"]}"')
         lines.append(f'  keys    = {_format_list(entity.get("keys", ["id"]))}')
 
+        # Fields
+        fields = entity.get("fields", {})
+        if fields:
+            lines.append("")
+            for field_name, field_def in fields.items():
+                field_lines = _format_field(field_name, field_def)
+                lines.extend(field_lines)
+
         # Access
         access = entity.get("access", {})
         tenant_strategy = access.get("tenant_strategy", "none")
@@ -152,6 +160,7 @@ def to_hcl(graph: dict[str, Any]) -> str:
         # Relations
         relations = entity.get("relations", {})
         if relations:
+            lines.append("")
             for rel_name, rel_def in relations.items():
                 rel_lines = _format_relation(rel_name, rel_def)
                 lines.extend(rel_lines)
@@ -160,6 +169,31 @@ def to_hcl(graph: dict[str, Any]) -> str:
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_field(field_name: str, field_def: dict) -> list[str]:
+    """Format a field in HCL format - compact one-liner style."""
+    lines = []
+    field_type = field_def.get("type", "string")
+    nullable = field_def.get("nullable", True)
+    enum_values = field_def.get("enum_values", [])
+
+    # Build inline attributes
+    attrs = [f'type = "{field_type}"']
+
+    if not nullable:
+        attrs.append("required")
+
+    if enum_values:
+        # Short enum inline
+        if len(enum_values) <= 3:
+            attrs.append(f'values = {_format_list(enum_values)}')
+        else:
+            # Just indicate it's an enum, values are in schema
+            attrs.append(f'values = [{len(enum_values)}]')
+
+    lines.append(f'  field "{field_name}" {{ {", ".join(attrs)} }}')
+    return lines
 
 
 def _format_relation(rel_name: str, rel_def: dict) -> list[str]:

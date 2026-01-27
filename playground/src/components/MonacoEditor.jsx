@@ -1,37 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import Editor, { useMonaco } from '@monaco-editor/react'
-import { setQueryText, selectQueryText, executeQuery, selectQueryLoading, selectOperationMode, setOperationMode } from '../store/querySlice'
+import { setQueryText, selectQueryText, executeQuery, selectOperationMode } from '../store/querySlice'
 import { selectGraph } from '../store/graphSlice'
 import Toast from './Toast'
-
-// Operation mode configurations
-const OPERATION_MODES = [
-  { id: 'query', label: 'Query', color: 'blue' },
-  { id: 'create', label: 'Create', color: 'green' },
-  { id: 'update', label: 'Update', color: 'yellow' },
-  { id: 'rewrite', label: 'Rewrite', color: 'orange' },
-  { id: 'delete', label: 'Delete', color: 'red' },
-  { id: 'transaction', label: 'Transaction', color: 'purple' },
-]
-
-const MODE_COLORS = {
-  query: 'bg-blue-600/30 text-blue-400 border-blue-500',
-  create: 'bg-green-600/30 text-green-400 border-green-500',
-  update: 'bg-yellow-600/30 text-yellow-400 border-yellow-500',
-  rewrite: 'bg-orange-600/30 text-orange-400 border-orange-500',
-  delete: 'bg-red-600/30 text-red-400 border-red-500',
-  transaction: 'bg-purple-600/30 text-purple-400 border-purple-500',
-}
-
-const MODE_BUTTON_COLORS = {
-  query: 'bg-blue-600 hover:bg-blue-700',
-  create: 'bg-green-600 hover:bg-green-700',
-  update: 'bg-yellow-600 hover:bg-yellow-700',
-  rewrite: 'bg-orange-600 hover:bg-orange-700',
-  delete: 'bg-red-600 hover:bg-red-700',
-  transaction: 'bg-purple-600 hover:bg-purple-700',
-}
 
 // Custom theme for dark mode
 const DARK_THEME = {
@@ -787,7 +759,6 @@ export default function MonacoEditor() {
   const formatRef = useRef(null)
   const value = useSelector(selectQueryText)
   const graph = useSelector(selectGraph)
-  const loading = useSelector(selectQueryLoading)
   const operationMode = useSelector(selectOperationMode)
   const [toast, setToast] = useState(null)
 
@@ -885,6 +856,15 @@ export default function MonacoEditor() {
   executeRef.current = handleExecute
   formatRef.current = handleFormat
 
+  // Listen for format event from header
+  useEffect(() => {
+    const handleFormatEvent = () => {
+      formatRef.current?.()
+    }
+    window.addEventListener('supergraph:format', handleFormatEvent)
+    return () => window.removeEventListener('supergraph:format', handleFormatEvent)
+  }, [])
+
   return (
     <div className="h-full flex flex-col bg-[#0D1117]">
       {/* Toast notifications */}
@@ -895,59 +875,6 @@ export default function MonacoEditor() {
           onClose={() => setToast(null)}
         />
       )}
-
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-900">
-        <div className="flex items-center gap-1">
-          {OPERATION_MODES.map((mode) => (
-            <button
-              key={mode.id}
-              onClick={() => dispatch(setOperationMode(mode.id))}
-              className={`text-xs px-3 py-1.5 rounded transition-colors ${
-                operationMode === mode.id
-                  ? `${MODE_COLORS[mode.id]} border`
-                  : 'text-gray-400 hover:text-white hover:bg-gray-700'
-              }`}
-            >
-              {mode.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleFormat}
-            className="text-xs text-gray-400 hover:text-white px-2 py-1 hover:bg-gray-700 rounded transition-colors"
-            title="Format (Ctrl+S)"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
-            </svg>
-          </button>
-          <button
-            onClick={handleExecute}
-            disabled={loading}
-            className={`flex items-center gap-2 ${MODE_BUTTON_COLORS[operationMode]} disabled:bg-gray-600 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors`}
-            title="Execute (Ctrl+Enter)"
-          >
-            {loading ? (
-              <>
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Running
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                </svg>
-                Execute
-              </>
-            )}
-          </button>
-        </div>
-      </div>
 
       {/* Editor */}
       <div className="flex-1">

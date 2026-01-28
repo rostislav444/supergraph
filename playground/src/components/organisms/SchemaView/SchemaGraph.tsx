@@ -107,21 +107,36 @@ function EntityNode({
               className="text-[10px] py-0.5 font-mono flex items-center gap-1 relative"
               style={{ height: FIELD_HEIGHT }}
             >
-              {/* Target handle for 'id' field - receives FK connections */}
+              {/* Target handles for 'id' field - receives FK connections from both sides */}
               {field.name === 'id' && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="field-id-target"
-                  style={{
-                    background: '#ef4444',
-                    width: 6,
-                    height: 6,
-                    left: -14,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                  }}
-                />
+                <>
+                  <Handle
+                    type="target"
+                    position={Position.Left}
+                    id="field-id-target-left"
+                    style={{
+                      background: '#ef4444',
+                      width: 6,
+                      height: 6,
+                      left: -14,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                    }}
+                  />
+                  <Handle
+                    type="target"
+                    position={Position.Right}
+                    id="field-id-target-right"
+                    style={{
+                      background: '#ef4444',
+                      width: 6,
+                      height: 6,
+                      right: -14,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                    }}
+                  />
+                </>
               )}
               {/* Source handle for 'id' field - sends to Relationship.subject_id */}
               {field.name === 'id' && (
@@ -565,7 +580,43 @@ async function applyElkLayout(
     })
   })
 
-  return { nodes: allNodes, edges }
+  // Adjust edge target handles based on node positions
+  // If source is to the right of target, use right handle; otherwise use left
+  const adjustedEdges = edges.map(edge => {
+    // Only adjust edges that don't have a specific target handle or target id field
+    if (edge.targetHandle && !edge.targetHandle.includes('id-target')) {
+      return edge
+    }
+
+    const sourceNode = allNodes.find(n => n.id === edge.source)
+    const targetNode = allNodes.find(n => n.id === edge.target)
+
+    if (!sourceNode || !targetNode) return edge
+
+    // Get absolute positions (accounting for parent groups)
+    const getAbsoluteX = (node: Node): number => {
+      let x = node.position.x
+      if (node.parentId) {
+        const parent = allNodes.find(n => n.id === node.parentId)
+        if (parent) x += parent.position.x
+      }
+      return x
+    }
+
+    const sourceX = getAbsoluteX(sourceNode)
+    const targetX = getAbsoluteX(targetNode)
+
+    // If source is to the right of target, connect to right handle
+    // If source is to the left, connect to left handle
+    const newTargetHandle = sourceX > targetX ? 'field-id-target-right' : 'field-id-target-left'
+
+    return {
+      ...edge,
+      targetHandle: newTargetHandle,
+    }
+  })
+
+  return { nodes: allNodes, edges: adjustedEdges }
 }
 
 function SchemaGraphInner({ graph }: SchemaGraphProps) {
@@ -749,7 +800,7 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
               source: 'Relationship',
               sourceHandle: 'field-object_id',
               target: rel.target,
-              targetHandle: 'field-id-target',
+              targetHandle: 'field-id-target-left',
               type: 'smoothstep',
               animated: true,
               style: {
@@ -860,7 +911,7 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
           source: name,
           sourceHandle: `field-${field.name}`,
           target: field.fkTarget,
-          targetHandle: 'field-id-target',
+          // No targetHandle - let React Flow auto-select closest handle
           type: 'smoothstep',
           animated,
           style: {
@@ -984,14 +1035,14 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
       setIsLayouting(true)
 
       try {
-        const { nodes: layoutedNodes } = await applyElkLayout(
+        const { nodes: layoutedNodes, edges: adjustedEdges } = await applyElkLayout(
           nodesToLayout,
           edgesToLayout,
           'elk-layered',
           serviceColorMap
         )
         setNodes([...layoutedNodes])
-        setEdges([...edgesToLayout])
+        setEdges([...adjustedEdges])
 
         window.requestAnimationFrame(() => {
           fitView({ padding: 0.2, duration: 300 })
@@ -1017,14 +1068,14 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
       setIsLayouting(true)
 
       try {
-        const { nodes: layoutedNodes } = await applyElkLayout(
+        const { nodes: layoutedNodes, edges: adjustedEdges } = await applyElkLayout(
           rawNodes,
           rawEdges,
           'elk-layered',
           serviceColorMap
         )
         setNodes([...layoutedNodes])
-        setEdges([...rawEdges])
+        setEdges([...adjustedEdges])
 
         window.requestAnimationFrame(() => {
           fitView({ padding: 0.1, duration: 300 })

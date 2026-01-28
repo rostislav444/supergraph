@@ -263,8 +263,18 @@ function ServiceGroupNode({
   )
 }
 
+// Helper to lighten/darken a hex color
+function adjustColor(hex: string, percent: number): string {
+  const num = parseInt(hex.replace('#', ''), 16)
+  const r = Math.min(255, Math.max(0, (num >> 16) + Math.round(2.55 * percent)))
+  const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00ff) + Math.round(2.55 * percent)))
+  const b = Math.min(255, Math.max(0, (num & 0x0000ff) + Math.round(2.55 * percent)))
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`
+}
+
 // Custom edge component with offset support for parallel edges
-// Creates orthogonal paths with offset in the middle segment
+// Adds "legs" from handles to the offset path to keep connections intact
+// Supports shade variation for edges within the same service
 function OffsetEdge({
   id,
   sourceX,
@@ -283,23 +293,45 @@ function OffsetEdge({
   data,
 }: EdgeProps) {
   const offset = (data?.offset as number) || 0
-  const EDGE_SPACING = 15 // pixels between parallel edges
-  const offsetAmount = offset * EDGE_SPACING
-  const radius = 6 // corner radius
+  const serviceColor = data?.serviceColor as string | undefined
+  const shadeIndex = (data?.shadeIndex as number) || 0
+  const shadeTotal = (data?.shadeTotal as number) || 1
+  const EDGE_SPACING = 10 // pixels between parallel edges
+
+  // Calculate shade for this edge: distribute from light (+40) to dark (-30)
+  // based on edge index within the service
+  let strokeColor = style?.stroke as string
+  if (serviceColor && shadeTotal > 1) {
+    // Range from +40 (lightest) to -30 (darkest)
+    const shadeRange = 70
+    const shadeStep = shadeRange / (shadeTotal - 1)
+    const shadePercent = 40 - (shadeIndex * shadeStep)
+    strokeColor = adjustColor(serviceColor, shadePercent)
+  } else if (serviceColor) {
+    strokeColor = serviceColor
+  }
 
   // For zero offset, use standard smoothstep
   if (offset === 0) {
-    const [path, labelX, labelY] = getSmoothStepPath({
+    const [path, labelPosX, labelPosY] = getSmoothStepPath({
       sourceX, sourceY, sourcePosition,
       targetX, targetY, targetPosition,
-      borderRadius: radius,
+      borderRadius: 8,
     })
 
     return (
       <>
-        <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+        <BaseEdge
+          id={id}
+          path={path}
+          style={{
+            ...style,
+            stroke: strokeColor,
+          }}
+          markerEnd={markerEnd}
+        />
         {label && (
-          <g transform={`translate(${labelX}, ${labelY})`}>
+          <g transform={`translate(${labelPosX}, ${labelPosY})`}>
             <rect
               x={-((labelBgPadding as [number, number])?.[0] || 4)}
               y={-8}
@@ -317,68 +349,55 @@ function OffsetEdge({
     )
   }
 
-  // Determine primary direction based on source/target positions
-  const isSourceRight = sourcePosition === Position.Right
-  const isSourceLeft = sourcePosition === Position.Left
-  const isTargetRight = targetPosition === Position.Right
-  const isTargetLeft = targetPosition === Position.Left
+  // Calculate perpendicular offset
+  const dx = targetX - sourceX
+  const dy = targetY - sourceY
+  const length = Math.sqrt(dx * dx + dy * dy) || 1
 
-  // Calculate midpoint for the offset segment
-  const midX = (sourceX + targetX) / 2
-  const midY = (sourceY + targetY) / 2
+  // Perpendicular unit vector
+  const perpX = -dy / length
+  const perpY = dx / length
 
-  let edgePath: string
-  let labelX: number
-  let labelY: number
+  const offsetAmount = offset * EDGE_SPACING
 
-  // Build path based on handle positions
-  if ((isSourceRight || isSourceLeft) && (isTargetRight || isTargetLeft)) {
-    // Horizontal flow: source exits horizontally, target enters horizontally
-    // Path: source → horizontal → vertical (with offset) → horizontal → target
-    const exitDir = isSourceRight ? 1 : -1
-    const enterDir = isTargetLeft ? -1 : 1
+  // Offset positions for the main path
+  const offsetSourceX = sourceX + perpX * offsetAmount
+  const offsetSourceY = sourceY + perpY * offsetAmount
+  const offsetTargetX = targetX + perpX * offsetAmount
+  const offsetTargetY = targetY + perpY * offsetAmount
 
-    // First horizontal segment length
-    const segLen = Math.min(30, Math.abs(targetX - sourceX) / 4)
+  // Get the offset smoothstep path
+  const [offsetPath] = getSmoothStepPath({
+    sourceX: offsetSourceX,
+    sourceY: offsetSourceY,
+    sourcePosition,
+    targetX: offsetTargetX,
+    targetY: offsetTargetY,
+    targetPosition,
+    borderRadius: 8,
+  })
 
-    // Waypoints
-    const x1 = sourceX + exitDir * segLen
-    const x2 = targetX + enterDir * segLen
-    const yMid = midY + offsetAmount
+  // Build final path: handle → offset start → offset path → offset end → handle
+  // The offsetPath starts with "M x y", we need to replace it with a line from actual source
+  const pathWithoutM = offsetPath.replace(/^M\s*[\d.-]+\s*[\d.-]+\s*/, '')
 
-    edgePath = `
-      M ${sourceX} ${sourceY}
-      L ${x1} ${sourceY}
-      Q ${x1 + exitDir * radius} ${sourceY} ${x1 + exitDir * radius} ${sourceY + Math.sign(yMid - sourceY) * radius}
-      L ${x1 + exitDir * radius} ${yMid - Math.sign(yMid - sourceY) * radius}
-      Q ${x1 + exitDir * radius} ${yMid} ${x1 + exitDir * radius + Math.sign(x2 - x1) * radius} ${yMid}
-      L ${x2 + enterDir * radius - Math.sign(x2 - x1) * radius} ${yMid}
-      Q ${x2 + enterDir * radius} ${yMid} ${x2 + enterDir * radius} ${yMid + Math.sign(targetY - yMid) * radius}
-      L ${x2 + enterDir * radius} ${targetY - Math.sign(targetY - yMid) * radius}
-      Q ${x2 + enterDir * radius} ${targetY} ${x2} ${targetY}
-      L ${targetX} ${targetY}
-    `.replace(/\s+/g, ' ').trim()
+  const edgePath = `M ${sourceX} ${sourceY} L ${offsetSourceX} ${offsetSourceY} ${pathWithoutM} L ${targetX} ${targetY}`
 
-    labelX = midX
-    labelY = yMid
-  } else {
-    // Vertical or mixed flow - use simpler bezier curve with offset
-    const controlOffset = offsetAmount
-
-    edgePath = `
-      M ${sourceX} ${sourceY}
-      C ${sourceX + controlOffset} ${sourceY + (targetY - sourceY) * 0.3}
-        ${targetX + controlOffset} ${targetY - (targetY - sourceY) * 0.3}
-        ${targetX} ${targetY}
-    `.replace(/\s+/g, ' ').trim()
-
-    labelX = midX + controlOffset * 0.5
-    labelY = midY
-  }
+  // Label position at midpoint of offset path
+  const labelX = (offsetSourceX + offsetTargetX) / 2
+  const labelY = (offsetSourceY + offsetTargetY) / 2
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={{
+          ...style,
+          stroke: strokeColor,
+        }}
+        markerEnd={markerEnd}
+      />
       {label && (
         <g transform={`translate(${labelX}, ${labelY})`}>
           <rect
@@ -409,6 +428,7 @@ const edgeTypes = {
 
 // Calculate edge offsets to prevent overlapping
 // Groups edges by their endpoints and handles to assign perpendicular offsets
+// Also assigns color shades for edges within the same service
 function calculateEdgeOffsets(edges: Edge[]): Edge[] {
   // Group edges by:
   // 1. Same source-target pair (bidirectional corridors)
@@ -486,11 +506,37 @@ function calculateEdgeOffsets(edges: Edge[]): Edge[] {
     }
   })
 
-  // Apply offsets to edges
+  // Group edges by service color to assign different shades
+  const serviceEdgeGroups: Record<string, Edge[]> = {}
+  edges.forEach(edge => {
+    const serviceColor = edge.data?.serviceColor as string | undefined
+    if (serviceColor) {
+      if (!serviceEdgeGroups[serviceColor]) serviceEdgeGroups[serviceColor] = []
+      serviceEdgeGroups[serviceColor].push(edge)
+    }
+  })
+
+  // Calculate shade index for each edge within its service
+  const edgeShadeIndex = new Map<string, number>()
+  const edgeShadeTotal = new Map<string, number>()
+
+  Object.entries(serviceEdgeGroups).forEach(([, group]) => {
+    group.forEach((edge, index) => {
+      edgeShadeIndex.set(edge.id, index)
+      edgeShadeTotal.set(edge.id, group.length)
+    })
+  })
+
+  // Apply offsets and shade info to edges
   return edges.map(edge => ({
     ...edge,
     type: 'offset',
-    data: { ...edge.data, offset: edgeOffsets.get(edge.id) || 0 },
+    data: {
+      ...edge.data,
+      offset: edgeOffsets.get(edge.id) || 0,
+      shadeIndex: edgeShadeIndex.get(edge.id) ?? 0,
+      shadeTotal: edgeShadeTotal.get(edge.id) ?? 1,
+    },
   }))
 }
 
@@ -1059,21 +1105,19 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         if (edgeSet.has(edgeId)) return
 
         const isCrossService = graph.entities[rel.target].service !== service
-        const isFkRelation = !!rel.ref
 
-        let strokeColor = '#22c55e'
+        let strokeColor = color.border // Use service color for intra-service
         let strokeWidth = 2
         let animated = rel.cardinality === 'many'
         let strokeDasharray: string | undefined
+        let serviceColorForEdge: string | undefined = color.border // Pass for gradient
 
         if (isCrossService) {
           strokeColor = '#fbbf24' // Yellow for cross-service
           strokeWidth = 2
           strokeDasharray = '6,4'
           animated = true // Always animated for cross-service
-        } else if (isFkRelation) {
-          strokeColor = '#8b5cf6'
-          animated = false
+          serviceColorForEdge = undefined // No gradient for cross-service
         } else if (rel.cardinality === 'one') {
           animated = false
         }
@@ -1089,6 +1133,9 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
             stroke: strokeColor,
             strokeWidth,
             strokeDasharray,
+          },
+          data: {
+            serviceColor: serviceColorForEdge,
           },
           labelStyle: {
             fill: '#9ca3af',
@@ -1128,14 +1175,16 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         if (!targetEntity) return
 
         const isCrossService = targetEntity.service !== service
-        let strokeColor = '#8b5cf6' // Purple for FK
+        let strokeColor = color.border // Use service color for intra-service FK
         let strokeDasharray: string | undefined
         let animated = false
+        let serviceColorForEdge: string | undefined = color.border
 
         if (isCrossService) {
           strokeColor = '#fbbf24' // Yellow for cross-service
           strokeDasharray = '6,4'
           animated = true // Animated for cross-service
+          serviceColorForEdge = undefined // No gradient for cross-service
         }
 
         edges.push({
@@ -1150,6 +1199,9 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
             stroke: strokeColor,
             strokeWidth: 2,
             strokeDasharray,
+          },
+          data: {
+            serviceColor: serviceColorForEdge,
           },
           labelStyle: {
             fill: '#9ca3af',

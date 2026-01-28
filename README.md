@@ -622,43 +622,43 @@ DELETE /entity/Person                    # Delete
 
 Interactive visual interface for building queries and exploring the schema.
 
-### Schema Views
-
-**Graph View** — Interactive ERD diagram showing all entities and their relations across services. Click entities to see details, drag to explore connections.
-
-![Schema Graph](screens/01-schema-graph.png)
-
-**HCL View** — Human-readable schema in HCL format with outline navigation. Jump to any entity or section. Shows fields, types, filters, relations.
-
-![Schema HCL](screens/02-schema-hcl.png)
-
-**JSON View** — Full compiled schema in JSON. Useful for debugging and understanding the exact structure gateway uses.
-
-![Schema JSON](screens/03-schema-json.png)
-
-**TypeScript View** — Auto-generated TypeScript interfaces for all entities. Download or copy directly. Includes entity types, filter types, relation configs, and typed hooks.
-
-![Schema TypeScript](screens/04-schema-typescript.png)
+Access at: `http://localhost:8000/playground`
 
 ### Explorer
 
-**Query Mode (JSON Response)** — Build queries visually: select entity, pick fields, add filters, configure relations. See raw JSON response.
+**Query Mode (JSON Response)** — Build queries visually: select entity, pick fields, add filters, configure relations. See raw JSON response with syntax highlighting.
 
 ![Explorer Query JSON](screens/05-explorer-query-json.png)
 
-**Query Mode (Table View)** — Same query, but results displayed in sortable, filterable table with server-side pagination. Click columns to sort, use pagination controls.
+**Query Mode (Table View)** — Same query, but results displayed in sortable, filterable table with server-side pagination. Click column headers to sort, use pagination controls at bottom.
 
 ![Explorer Query Table](screens/06-explorer-query-table.png)
 
-**Create Mode** — Visual form for creating records. Form fields are auto-generated from schema. FK fields have lookup buttons to search related entities.
+**Create Mode** — Visual form for creating records. Form fields are auto-generated from schema with proper input types. FK fields have lookup buttons to search and select related entities.
 
 ![Explorer Create](screens/07-explorer-create.png)
 
-**Transaction Mode** — Build multi-step transactions visually. Add steps, configure variable bindings (`$step1.id`), set error handling mode. See generated JSON and execute.
+**Transaction Mode** — Build multi-step transactions visually. Add steps for create/update/delete operations, configure variable bindings between steps (`$person.id`), set error handling mode (rollback/stop/continue). See generated JSON and execute.
 
 ![Explorer Transaction](screens/08-explorer-transaction.png)
 
-Access at: `http://localhost:8000/playground`
+### Schema Views
+
+**Graph View** — Interactive ERD diagram showing all entities and their relations across services. Entities are color-coded by service. Click to see details, drag to rearrange, zoom to explore.
+
+![Schema Graph](screens/01-schema-graph.png)
+
+**HCL View** — Human-readable schema in HCL format with outline navigation on the left. Click any entity to jump to its definition. Shows fields with types, available filters, relations to other entities.
+
+![Schema HCL](screens/02-schema-hcl.png)
+
+**JSON View** — Full compiled schema in JSON format. Useful for debugging and understanding the exact structure gateway uses internally. Outline navigation on the left.
+
+![Schema JSON](screens/03-schema-json.png)
+
+**TypeScript View** — Auto-generated TypeScript interfaces for all entities. Download button to save as file, Copy button for clipboard. Includes entity interfaces, filter types, relation configs, create/update inputs, and typed React hooks.
+
+![Schema TypeScript](screens/04-schema-typescript.png)
 
 ---
 

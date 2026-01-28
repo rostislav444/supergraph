@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { HclHighlighter } from './HclHighlighter'
+import { JsonHighlighter } from './JsonHighlighter'
 import { SchemaGraph } from './SchemaGraph'
 import { TypeScriptGenerator } from './TypeScriptGenerator'
 import type { Graph } from '@/types'
@@ -83,11 +84,11 @@ export function SchemaView({ graph, viewMode = 'graph' }: SchemaViewProps) {
           <SchemaGraph graph={graph} />
         </div>
       ) : (
-        <div className="flex-1 overflow-auto p-4 bg-[#0D1117]">
+        <div className="flex-1 overflow-auto p-4 bg-[#0d1117]">
           {viewMode === 'hcl' ? (
             <HclHighlighter code={hcl} />
           ) : (
-            <pre className="font-mono text-sm text-gray-300 whitespace-pre">{JSON.stringify(graph, null, 2)}</pre>
+            <JsonHighlighter data={graph} />
           )}
         </div>
       )}

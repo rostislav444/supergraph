@@ -4,6 +4,34 @@ interface TypeScriptGeneratorProps {
   graph: Graph
 }
 
+const MAX_LINE_LENGTH = 120
+
+// Wrap long lines at word boundaries (| or ,)
+function wrapLine(line: string, indent: string = ''): string[] {
+  if (line.length <= MAX_LINE_LENGTH) {
+    return [line]
+  }
+
+  const lines: string[] = []
+  let currentLine = ''
+  const parts = line.split(/(\s*\|\s*|\s*,\s*)/)
+
+  for (const part of parts) {
+    if ((currentLine + part).length > MAX_LINE_LENGTH && currentLine.length > 0) {
+      lines.push(currentLine.trimEnd())
+      currentLine = indent + '  ' + part.trimStart()
+    } else {
+      currentLine += part
+    }
+  }
+
+  if (currentLine.trim()) {
+    lines.push(currentLine)
+  }
+
+  return lines
+}
+
 // Map schema types to TypeScript types
 function mapFieldType(field: Field): string {
   const baseType = (() => {
@@ -73,7 +101,8 @@ function generateTypeScript(graph: Graph): string {
         const tsType = mapFieldType(field)
         const optional = field.nullable ? '?' : ''
         const fkComment = field.fk ? ` // FK -> ${field.fk.target_entity}.${field.fk.target_field}` : ''
-        lines.push(`  ${fieldName}${optional}: ${tsType}${fkComment}`)
+        const fieldLine = `  ${fieldName}${optional}: ${tsType}${fkComment}`
+        wrapLine(fieldLine, '  ').forEach(l => lines.push(l))
       })
 
       lines.push('}')
@@ -106,7 +135,8 @@ function generateTypeScript(graph: Graph): string {
 
   // Entity names union
   const entityNames = entities.map(([name]) => `'${name}'`).join(' | ')
-  lines.push(`export type EntityName = ${entityNames}`)
+  const entityNameLine = `export type EntityName = ${entityNames}`
+  wrapLine(entityNameLine, '').forEach(l => lines.push(l))
   lines.push('')
 
   // Create input types (without id, with optional fields)
@@ -128,7 +158,8 @@ function generateTypeScript(graph: Graph): string {
   lines.push(`export const SERVICE_ENTITIES = {`)
   Object.entries(byService).sort((a, b) => a[0].localeCompare(b[0])).forEach(([service, serviceEntities]) => {
     const entityList = serviceEntities.map(([name]) => `'${name}'`).join(', ')
-    lines.push(`  '${service}': [${entityList}] as const,`)
+    const serviceLine = `  '${service}': [${entityList}] as const,`
+    wrapLine(serviceLine, '  ').forEach(l => lines.push(l))
   })
   lines.push(`} as const`)
   lines.push('')

@@ -43,8 +43,10 @@ import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 
 from ..core.errors import ExecutionError, IAMError, ServiceError, ValidationError
+from ..core.typescript_generator import generate_typescript
 from ..core.query_types import JSONQuery, MutationResult, TransactionResult
 from ..core.request_parser import ParsedRequest, RequestParser, EntityQuery
 from ..core.validator import QueryValidator
@@ -115,14 +117,27 @@ async def get_principal() -> Principal:
 @router.get("/__graph")
 async def get_graph_endpoint(graph: dict = Depends(get_graph)) -> dict:
     """
-    Return the compiled graph schema.
+    Return the compiled graph schema (JSON).
 
     Used by frontend for:
-    - TypeScript type generation
     - Form/table building
     - Query building UI
     """
     return graph
+
+
+@router.get("/__graph.ts", response_class=PlainTextResponse)
+async def get_graph_typescript(graph: dict = Depends(get_graph)) -> str:
+    """
+    Return TypeScript types generated from the graph schema.
+
+    Usage:
+        curl http://localhost:8000/__graph.ts > src/generated/supergraph.ts
+
+    Or use CLI:
+        npx use-supergraph generate --url http://localhost:8000/__graph.ts
+    """
+    return generate_typescript(graph)
 
 
 @router.post("/")

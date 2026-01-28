@@ -4,19 +4,19 @@
 
 Query data across multiple services with a simple JSON syntax. No GraphQL schemas, no code generation, just declarative ViewSets and automatic schema discovery.
 
+![Schema Graph View](screens/01-schema-graph.png)
+
 ```json
 {
   "Person": {
     "filters": {"id__eq": 1},
-    "select": {
-      "fields": ["id", "first_name", "last_name"],
-      "relations": {
-        "owned_properties": {
-          "fields": ["id", "name", "status"],
-          "relations": {
-            "property": {
-              "fields": ["id", "address"]
-            }
+    "fields": ["id", "first_name", "last_name"],
+    "relations": {
+      "owned_properties": {
+        "fields": ["id", "name", "status"],
+        "relations": {
+          "property": {
+            "fields": ["id", "address"]
           }
         }
       }
@@ -32,7 +32,8 @@ Query data across multiple services with a simple JSON syntax. No GraphQL schema
 - **ViewSet pattern** — DRF-style declarative configuration
 - **Built-in IAM** — Tenant isolation with automatic guard injection
 - **Auto-discovery** — Gateway discovers schemas from services automatically
-- **Playground** — Visual query builder bundled with the package
+- **Playground** — Visual query builder with schema explorer
+- **TypeScript generation** — Auto-generated types for frontend
 - **CLI tooling** — Scaffold services with Django-like `manage.py`
 - **Mutations & Transactions** — Create, update, delete with saga pattern
 
@@ -103,6 +104,42 @@ supergraph dev
 # or
 docker-compose up
 ```
+
+---
+
+## Playground
+
+The bundled playground provides a complete visual interface for working with your API:
+
+### Schema Views
+
+**Graph View** — Interactive ERD diagram showing all entities and relations across services:
+![Schema Graph](screens/01-schema-graph.png)
+
+**HCL View** — Human-readable schema configuration with outline navigation:
+![Schema HCL](screens/02-schema-hcl.png)
+
+**JSON View** — Full schema in JSON format with entity outline:
+![Schema JSON](screens/03-schema-json.png)
+
+**TypeScript View** — Auto-generated TypeScript interfaces with Download/Copy:
+![Schema TypeScript](screens/04-schema-typescript.png)
+
+### Explorer
+
+**Query Mode (JSON)** — Build queries with field selection, filters, relations:
+![Explorer Query JSON](screens/05-explorer-query-json.png)
+
+**Query Mode (Table)** — View results in filterable, sortable table with pagination:
+![Explorer Query Table](screens/06-explorer-query-table.png)
+
+**Create Mode** — Visual form builder for creating records:
+![Explorer Create](screens/07-explorer-create.png)
+
+**Transaction Mode** — Multi-step transaction builder with variable binding:
+![Explorer Transaction](screens/08-explorer-transaction.png)
+
+Access at: `http://localhost:8000/playground`
 
 ---
 
@@ -272,15 +309,13 @@ Ref(
 }
 ```
 
-**Full query with select:**
+**Full query with relations:**
 ```json
 {
-  "action": "query",
-  "entity": "Person",
-  "filters": {"name__icontains": "john"},
-  "select": {
+  "Person": {
+    "filters": {"name__icontains": "john"},
     "fields": ["id", "first_name", "last_name"],
-    "order": ["-created_at", "first_name"],
+    "ordering": ["-created_at", "first_name"],
     "limit": 10,
     "offset": 0,
     "relations": {
@@ -324,7 +359,7 @@ Ref(
 
 ```json
 {
-  "order": ["-created_at", "name"]
+  "ordering": ["-created_at", "name"]
 }
 ```
 - Prefix with `-` for descending
@@ -388,15 +423,13 @@ Ref(
 }
 ```
 
-**Aliases:** `POST`, `insert`
-
 ### Update (Partial)
 
 ```json
 {
   "update": {
     "Person": {
-      "filters": {"id__eq": 1},
+      "id": 1,
       "data": {
         "email": "newemail@example.com"
       }
@@ -405,15 +438,13 @@ Ref(
 }
 ```
 
-**Aliases:** `PATCH`, `partial_update`
-
 ### Rewrite (Full Replace)
 
 ```json
 {
   "rewrite": {
     "Person": {
-      "filters": {"id__eq": 1},
+      "id": 1,
       "data": {
         "first_name": "John",
         "last_name": "Smith",
@@ -424,21 +455,17 @@ Ref(
 }
 ```
 
-**Aliases:** `PUT`, `replace`
-
 ### Delete
 
 ```json
 {
   "delete": {
     "Person": {
-      "filters": {"id__eq": 1}
+      "id": 1
     }
   }
 }
 ```
-
-**Aliases:** `DELETE`, `remove`
 
 ---
 
@@ -453,7 +480,7 @@ Execute multiple operations atomically with variable binding:
       {
         "create": {
           "Person": {
-            "data": {"first_name": "John"},
+            "data": {"first_name": "John", "gender": "MALE"},
             "as": "$person"
           }
         }
@@ -515,6 +542,7 @@ if __name__ == "__main__":
 | `/` | POST | Unified query/mutation endpoint |
 | `/query` | POST | Execute queries |
 | `/__graph` | GET | Get compiled schema (JSON) |
+| `/__graph.ts` | GET | Get TypeScript types |
 | `/__graph.hcl` | GET | Get schema (HCL format) |
 | `/playground` | GET | Visual query builder |
 | `/health` | GET | Health check |
@@ -525,11 +553,64 @@ The gateway also exposes REST endpoints:
 
 ```
 GET    /entity/Person           # List
-GET    /entity/Person/1         # Get by ID
+GET    /entity/Person?filters={"id__eq":1}  # Get by filter
 POST   /entity/Person           # Create
-PATCH  /entity/Person/1         # Update
-PUT    /entity/Person/1         # Replace
-DELETE /entity/Person/1         # Delete
+PATCH  /entity/Person           # Update
+PUT    /entity/Person           # Replace
+DELETE /entity/Person           # Delete
+```
+
+---
+
+## TypeScript Integration
+
+### Generate Types
+
+Download TypeScript types directly from your running backend:
+
+```bash
+# Using curl
+curl http://localhost:8000/__graph.ts > src/generated/supergraph.ts
+
+# Using CLI (requires @supergraph/use-supergraph)
+npx use-supergraph generate --url http://localhost:8000/__graph.ts --output ./src/generated
+```
+
+### React Hooks (use-supergraph)
+
+Install the React hooks package:
+
+```bash
+npm install @supergraph/use-supergraph @tanstack/react-query
+```
+
+Generate typed hooks and use them:
+
+```typescript
+import { PersonHooks, PropertyHooks } from './generated/supergraph'
+
+function PersonList() {
+  const { data, isLoading } = PersonHooks.useMany({
+    fields: ['id', 'first_name', 'last_name'],  // Autocomplete!
+    filters: { is_active: true },
+    relations: {
+      owned_properties: {
+        fields: ['id', 'name']
+      }
+    },
+    limit: 10
+  })
+
+  if (isLoading) return <div>Loading...</div>
+
+  return (
+    <ul>
+      {data?.map(person => (
+        <li key={person.id}>{person.first_name} {person.last_name}</li>
+      ))}
+    </ul>
+  )
+}
 ```
 
 ---
@@ -659,20 +740,6 @@ class SeedDataCommand(BaseCommand):
 ```bash
 python manage.py seed_data --count 500
 ```
-
----
-
-## Playground
-
-The bundled playground provides:
-
-- **Visual query builder** — Point-and-click query construction
-- **Schema explorer** — Browse entities, fields, relations
-- **Syntax highlighting** — JSON editor with validation
-- **Autocomplete** — Field and operator suggestions
-- **Query history** — Save and replay queries
-
-Access at: `http://localhost:8000/playground`
 
 ---
 

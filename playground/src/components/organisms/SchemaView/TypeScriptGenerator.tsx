@@ -106,11 +106,11 @@ function generateTypeScript(graph: Graph): string {
       })
 
       lines.push('}')
-      lines.push('')
 
       // Generate interface with relations if entity has relations
       const relations = Object.entries(entity.relations || {})
       if (relations.length > 0) {
+        lines.push('')
         lines.push(`export interface ${entityName}WithRelations extends ${entityName} {`)
 
         relations.sort((a, b) => a[0].localeCompare(b[0])).forEach(([relName, rel]) => {
@@ -122,8 +122,11 @@ function generateTypeScript(graph: Graph): string {
         })
 
         lines.push('}')
-        lines.push('')
       }
+
+      // Add spacing between entity blocks
+      lines.push('')
+      lines.push('')
     })
   })
 
@@ -233,47 +236,99 @@ export function TypeScriptGenerator({ graph }: TypeScriptGeneratorProps) {
         </div>
       </div>
 
-      {/* Code */}
-      <div className="flex-1 overflow-auto p-4 bg-[#0D1117]">
-        <pre className="font-mono text-sm leading-relaxed">
+      {/* Code - GitHub Dark theme */}
+      <div className="flex-1 overflow-auto p-4 bg-[#0d1117]">
+        <pre className="font-mono text-xs leading-relaxed">
           <code>
             {tsCode.split('\n').map((line, i) => {
-              // Syntax highlighting
+              // GitHub Dark syntax highlighting
               let highlighted = line
 
-              // Comments
-              if (line.trim().startsWith('//')) {
-                return <div key={i} className="text-gray-500">{line}</div>
+              // Empty lines
+              if (!line.trim()) {
+                return <div key={i} className="h-4">&nbsp;</div>
               }
 
-              // Export keywords
+              // Comments - #8b949e
+              if (line.trim().startsWith('//')) {
+                // Highlight === lines differently
+                if (line.includes('===')) {
+                  return <div key={i} style={{ color: '#6e7681' }}>{line}</div>
+                }
+                return <div key={i} style={{ color: '#8b949e' }}>{line}</div>
+              }
+
+              // Escape HTML
+              highlighted = highlighted
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+
+              // Keywords - #ff7b72 (red/pink)
               highlighted = highlighted.replace(
-                /\b(export|interface|type|extends|const|as)\b/g,
-                '<span class="text-purple-400">$1</span>'
+                /\b(export|interface|type|extends|const|as|readonly)\b/g,
+                '<span style="color:#ff7b72">$1</span>'
               )
 
-              // Type names (after interface/type keywords)
+              // Type/Interface names after keywords - #ffa657 (orange)
               highlighted = highlighted.replace(
-                /\b(interface|type)\s+(\w+)/g,
-                '<span class="text-purple-400">$1</span> <span class="text-yellow-300">$2</span>'
+                /(<span style="color:#ff7b72">(?:interface|type)<\/span>)\s+(\w+)/g,
+                '$1 <span style="color:#ffa657">$2</span>'
               )
 
-              // Built-in types
+              // Entity names after extends - #ffa657 (orange)
               highlighted = highlighted.replace(
-                /:\s*(string|number|boolean|null|unknown|Record<[^>]+>)/g,
-                ': <span class="text-cyan-400">$1</span>'
+                /(<span style="color:#ff7b72">extends<\/span>)\s+(\w+)/g,
+                '$1 <span style="color:#ffa657">$2</span>'
               )
 
-              // String literals
+              // Generic types like Omit<X, 'id'>, Partial<X>, Record<X, Y>
+              highlighted = highlighted.replace(
+                /\b(Omit|Partial|Pick|Record|Array)&lt;/g,
+                '<span style="color:#ffa657">$1</span>&lt;'
+              )
+
+              // Built-in types - #79c0ff (blue)
+              highlighted = highlighted.replace(
+                /:\s*(string|number|boolean|null|unknown)\b/g,
+                ': <span style="color:#79c0ff">$1</span>'
+              )
+
+              // Type references in union/array - #ffa657
+              highlighted = highlighted.replace(
+                /(\[\])(?!\w)/g,
+                '<span style="color:#c9d1d9">$1</span>'
+              )
+
+              // String literals in types - #a5d6ff (light blue)
               highlighted = highlighted.replace(
                 /'([^']+)'/g,
-                '<span class="text-green-400">\'$1\'</span>'
+                '<span style="color:#a5d6ff">\'$1\'</span>'
+              )
+
+              // Property names - #c9d1d9 (handled by default)
+              // Optional marker ? - #ff7b72
+              highlighted = highlighted.replace(
+                /(\w+)(\?)?:/g,
+                '<span style="color:#c9d1d9">$1</span>$2:'
+              )
+
+              // Brackets and punctuation - #c9d1d9
+              highlighted = highlighted.replace(
+                /([{}[\]()])/g,
+                '<span style="color:#c9d1d9">$1</span>'
+              )
+
+              // Pipe operator for unions - #ff7b72
+              highlighted = highlighted.replace(
+                / \| /g,
+                ' <span style="color:#ff7b72">|</span> '
               )
 
               return (
                 <div
                   key={i}
-                  className="text-gray-300"
+                  style={{ color: '#c9d1d9' }}
                   dangerouslySetInnerHTML={{ __html: highlighted }}
                 />
               )

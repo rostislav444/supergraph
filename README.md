@@ -1,350 +1,133 @@
 # Supergraph
 
-**JSON Query DSL for microservices** — A powerful alternative to GraphQL Federation.
+**JSON Query DSL for Microservices** — Powerful alternative to GraphQL Federation.
 
-Query data across multiple services with a simple JSON syntax. No GraphQL schemas, no code generation, just declarative ViewSets and automatic schema discovery.
+## Why Supergraph?
 
-![Schema Graph View](screens/01-schema-graph.png)
+In microservice architecture, data is spread across multiple services. Traditional approaches have problems:
 
-```json
-{
-  "Person": {
-    "filters": {"id__eq": 1},
-    "fields": ["id", "first_name", "last_name"],
-    "relations": {
-      "owned_properties": {
-        "fields": ["id", "name", "status"],
-        "relations": {
-          "property": {
-            "fields": ["id", "address"]
-          }
-        }
-      }
-    }
-  }
-}
-```
+- **REST**: Multiple round-trips, N+1 queries, manual data stitching
+- **GraphQL Federation**: Complex schema stitching, code generation, schema conflicts
 
-## Features
+**Supergraph solves this** with a simple JSON-based query language that:
 
-- **JSON Query DSL** — Intuitive JSON syntax instead of GraphQL
-- **Cross-service relations** — Traverse data across microservices in a single request
-- **ViewSet pattern** — DRF-style declarative configuration
-- **Built-in IAM** — Tenant isolation with automatic guard injection
-- **Auto-discovery** — Gateway discovers schemas from services automatically
-- **Playground** — Visual query builder with schema explorer
-- **TypeScript generation** — Auto-generated types for frontend
-- **CLI tooling** — Scaffold services with Django-like `manage.py`
-- **Mutations & Transactions** — Create, update, delete with saga pattern
+1. **Single request** — Query any data across services in one call
+2. **No code generation** — Just declare ViewSets, types are auto-discovered
+3. **Relations via separate service** — Extend entities without touching their services
+4. **Automatic federation** — Gateway discovers schemas from services at runtime
 
-## Installation
+## Core Concepts
 
-```bash
-pip install supergraph
-```
+### 1. ViewSets — Declare, Don't Code
 
-## Quick Start
-
-### 1. Initialize a project
-
-```bash
-supergraph init my-project
-cd my-project
-```
-
-Creates:
-```
-my-project/
-├── supergraph.yaml     # Main configuration
-├── services/           # Microservices directory
-└── gateway/            # API gateway
-```
-
-### 2. Create services
-
-```bash
-supergraph create-service person --port 8001
-supergraph create-service property --port 8002
-supergraph create-service relations --port 8003
-```
-
-Each service gets a complete structure:
-```
-services/person/
-├── main.py
-├── manage.py              # Django-like commands
-├── settings/
-│   ├── config.py
-│   └── db/
-│       ├── db_config.py
-│       └── alembic.ini
-├── models/
-│   ├── migrations/
-│   └── models.py
-├── views/
-├── services/
-├── signals/
-├── manage/
-│   └── commands/
-└── tests/
-```
-
-### 3. Run migrations
-
-```bash
-cd services/person
-python manage.py makemigrations
-python manage.py migrate
-```
-
-### 4. Start development
-
-```bash
-supergraph dev
-# or
-docker-compose up
-```
-
----
-
-## Playground
-
-The bundled playground provides a complete visual interface for working with your API:
-
-### Schema Views
-
-**Graph View** — Interactive ERD diagram showing all entities and relations across services:
-![Schema Graph](screens/01-schema-graph.png)
-
-**HCL View** — Human-readable schema configuration with outline navigation:
-![Schema HCL](screens/02-schema-hcl.png)
-
-**JSON View** — Full schema in JSON format with entity outline:
-![Schema JSON](screens/03-schema-json.png)
-
-**TypeScript View** — Auto-generated TypeScript interfaces with Download/Copy:
-![Schema TypeScript](screens/04-schema-typescript.png)
-
-### Explorer
-
-**Query Mode (JSON)** — Build queries with field selection, filters, relations:
-![Explorer Query JSON](screens/05-explorer-query-json.png)
-
-**Query Mode (Table)** — View results in filterable, sortable table with pagination:
-![Explorer Query Table](screens/06-explorer-query-table.png)
-
-**Create Mode** — Visual form builder for creating records:
-![Explorer Create](screens/07-explorer-create.png)
-
-**Transaction Mode** — Multi-step transaction builder with variable binding:
-![Explorer Transaction](screens/08-explorer-transaction.png)
-
-Access at: `http://localhost:8000/playground`
-
----
-
-## ViewSets — Defining Your API
-
-Supergraph uses **ViewSets** (similar to Django REST Framework) to declare how entities are exposed. This keeps your SQLAlchemy models clean.
-
-### ModelViewSet — Basic Entity
+Each entity is a ViewSet that declares what to expose. Fields, types, and filters are auto-discovered from SQLAlchemy models:
 
 ```python
-from sqlalchemy import Column, Integer, String
-from supergraph import ModelViewSet, AccessConfig
-from settings.db.db_config import Base
+from supergraph import ModelViewSet
 
-# 1. Define your model (plain SQLAlchemy)
-class Person(Base):
-    __tablename__ = "persons"
-
-    id = Column(Integer, primary_key=True)
-    first_name = Column(String(100))
-    last_name = Column(String(100))
-    email = Column(String(255))
-
-
-# 2. Define the ViewSet
 class PersonViewSet(ModelViewSet):
-    model = Person
-
-    # Auto-inferred from model:
-    # - service = "person"
-    # - resource = "/person"
-    # - fields = all columns with types and default filters
-    # - keys = ["id"]
-
-    # Optional overrides:
-    fields_exclude = ["internal_note"]  # Hide fields
-    filter_overrides = {
-        "email": ["eq", "icontains"],   # Custom filter operators
-    }
-    sortable_fields = {"id", "first_name", "last_name"}
-
-    # Pagination
-    pagination_default_limit = 50
-    pagination_max_limit = 200
-
-    # Access control
-    access = AccessConfig.none()  # No tenant isolation
+    model = Person  # SQLAlchemy model
+    # That's it! Fields, types, filters auto-discovered
 ```
 
-### Field Auto-Discovery
+### 2. Relations Service — Extend Without Modify
 
-Fields are automatically discovered from SQLAlchemy columns with smart defaults:
-
-| SQLAlchemy Type | Supergraph Type | Default Filters |
-|-----------------|-----------------|-----------------|
-| `Integer` | `int` | `eq`, `in`, `gte`, `lte`, `isnull` |
-| `String`, `Text` | `string` | `eq`, `in`, `icontains`, `isnull` |
-| `Boolean` | `bool` | `eq`, `isnull` |
-| `Float`, `Numeric` | `float` | `eq`, `in`, `gte`, `lte`, `isnull` |
-| `DateTime`, `Date` | `datetime`/`date` | `eq`, `gte`, `lte`, `isnull` |
-| `JSON`, `JSONB` | `json` | `eq`, `isnull` |
-
-### RelationsViewSet — Cross-Service Relations
-
-For junction tables and cross-service relations, use `RelationsViewSet`:
+The key innovation: a dedicated **relations service** that extends other entities without modifying them.
 
 ```python
-from supergraph import RelationsViewSet, AttachRelation, Through, Ref
-
-class Relationship(Base):
-    __tablename__ = "relationships"
-
-    id = Column(Integer, primary_key=True)
-    subject_id = Column(Integer)       # Target entity ID (e.g., Property.id)
-    object_id = Column(Integer)        # Parent entity ID (e.g., Person.id)
-    relationship_type = Column(String(50))
-    status = Column(String(20))
-
+from supergraph import RelationsViewSet, AttachRelation
 
 class RelationshipViewSet(RelationsViewSet):
     model = Relationship
-    service = "relations"  # Override auto-inferred name
+    service = "relations"
 
-    # Attach relations to OTHER entities
     attach = [
-        # Person → owned_properties (via Relationship)
+        # Add "ownedProperties" field to Person entity
         AttachRelation(
             parent_entity="Person",
-            name="owned_properties",
-            target_entity="Relationship",
-            cardinality="many",
-            through=Through(
-                parent_key="id",              # Person.id
-                child_match_field="object_id", # Relationship.object_id
-                target_key_field="subject_id", # For next hop
-                static_filters={
-                    "relationship_type": "property_owner",
-                    "status": "active",
-                }
-            ),
-        ),
-
-        # Relationship → property (direct FK)
-        AttachRelation(
-            parent_entity="Relationship",
-            name="property",
+            field_name="ownedProperties",
             target_entity="Property",
-            cardinality="one",
-            ref=Ref(
-                from_field="subject_id",  # Relationship.subject_id
-                to_field="id"             # Property.id
-            ),
+            relationship_type="property_owner",
         ),
-
-        # Property → owners (reverse lookup)
+        # Add reverse: "owners" field to Property
         AttachRelation(
             parent_entity="Property",
-            name="owners",
-            target_entity="Relationship",
-            cardinality="many",
-            through=Through(
-                parent_key="id",
-                child_match_field="subject_id",
-                target_key_field="object_id",
-                static_filters={
-                    "relationship_type": "property_owner",
-                    "status": "active",
-                }
-            ),
+            field_name="owners",
+            target_entity="Person",
+            relationship_type="property_owner",
         ),
     ]
 ```
 
-### Relation Types
+Now `Person` has `ownedProperties` field and `Property` has `owners` — without changing Person or Property services.
 
-**Through** — Many-to-many via junction table:
-```python
-Through(
-    parent_key="id",           # Key in parent to match
-    child_match_field="fk",    # Field in junction matching parent
-    target_key_field="target", # Field for next hop
-    static_filters={...}       # Always applied
-)
+### 3. Gateway — Automatic Federation
+
+Gateway discovers schemas from all services at startup and compiles them into a unified graph:
+
 ```
-
-**Ref** — Direct foreign key:
-```python
-Ref(
-    from_field="user_id",  # FK field in parent
-    to_field="id"          # PK field in target
-)
+┌─────────────────────────────────────────────────────────────────┐
+│                          Gateway                                 │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Request → Validate → Plan → Execute → Assemble → Response  ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+   ┌──────────┐        ┌──────────┐        ┌──────────┐
+   │  Person  │        │ Property │        │Relations │
+   │ Service  │        │ Service  │        │ Service  │
+   └──────────┘        └──────────┘        └──────────┘
 ```
 
 ---
 
-## JSON Query DSL
+## JSON Query Language (JsonQL)
 
-### Query Formats
+### Basic Query
 
-**Simple query:**
+Fetch entities with selected fields:
+
 ```json
 {
   "Person": {
-    "filters": {"id__eq": 1},
+    "fields": ["id", "first_name", "last_name", "email"]
+  }
+}
+```
+
+Response:
+```json
+{
+  "data": {
+    "items": [
+      {"id": 1, "first_name": "John", "last_name": "Doe", "email": "john@example.com"},
+      {"id": 2, "first_name": "Jane", "last_name": "Smith", "email": "jane@example.com"}
+    ],
+    "pagination": {"total": 2, "limit": 50, "offset": 0, "has_next": false}
+  }
+}
+```
+
+### Filtering
+
+Use `field__operator` syntax:
+
+```json
+{
+  "Person": {
+    "filters": {
+      "first_name__icontains": "john",
+      "is_active__eq": true,
+      "age__gte": 18,
+      "id__in": [1, 2, 3]
+    },
     "fields": ["id", "first_name"]
   }
 }
 ```
 
-**Full query with relations:**
-```json
-{
-  "Person": {
-    "filters": {"name__icontains": "john"},
-    "fields": ["id", "first_name", "last_name"],
-    "ordering": ["-created_at", "first_name"],
-    "limit": 10,
-    "offset": 0,
-    "relations": {
-      "owned_properties": {
-        "fields": ["id", "status"],
-        "filters": {"status__eq": "active"},
-        "limit": 5,
-        "relations": {
-          "property": {
-            "fields": ["id", "name", "address"]
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-**Multi-entity query:**
-```json
-{
-  "query": {
-    "Person": {"filters": {"id__in": [1, 2, 3]}},
-    "Property": {"filters": {"status__eq": "active"}}
-  }
-}
-```
-
-### Filter Operators
+**Available operators:**
 
 | Operator | Description | Example |
 |----------|-------------|---------|
@@ -355,39 +138,21 @@ Ref(
 | `lte` | Less than or equal | `{"price__lte": 100}` |
 | `isnull` | Is null check | `{"deleted_at__isnull": true}` |
 
-### Order Syntax
+### Pagination
+
+Control result size with `limit` and `offset`:
 
 ```json
 {
-  "ordering": ["-created_at", "name"]
-}
-```
-- Prefix with `-` for descending
-- No prefix for ascending
-
-### Response Format
-
-**Single entity:**
-```json
-{
-  "data": {
-    "id": 1,
-    "first_name": "John",
-    "owned_properties": [
-      {
-        "id": 10,
-        "status": "active",
-        "property": {
-          "id": 100,
-          "name": "Main Office"
-        }
-      }
-    ]
+  "Person": {
+    "fields": ["id", "first_name"],
+    "limit": 10,
+    "offset": 20
   }
 }
 ```
 
-**List response:**
+Response includes pagination metadata:
 ```json
 {
   "data": {
@@ -395,8 +160,95 @@ Ref(
     "pagination": {
       "total": 150,
       "limit": 10,
-      "offset": 0,
+      "offset": 20,
       "has_next": true
+    }
+  }
+}
+```
+
+### Ordering
+
+Sort results with `order` array. Prefix with `-` for descending:
+
+```json
+{
+  "Person": {
+    "fields": ["id", "first_name", "created_at"],
+    "order": ["-created_at", "first_name"]
+  }
+}
+```
+
+### Nested Relations
+
+Fetch related data in a single request — this is where Supergraph shines:
+
+```json
+{
+  "Person": {
+    "filters": {"id__eq": 1},
+    "fields": ["id", "first_name", "last_name"],
+    "relations": {
+      "ownedProperties": {
+        "fields": ["id", "address", "status"],
+        "filters": {"status__eq": "active"},
+        "limit": 5,
+        "relations": {
+          "tenants": {
+            "fields": ["id", "first_name", "email"]
+          }
+        }
+      },
+      "ownedVehicles": {
+        "fields": ["id", "plate", "make"],
+        "order": ["-created_at"]
+      }
+    }
+  }
+}
+```
+
+Response has nested data:
+```json
+{
+  "data": {
+    "id": 1,
+    "first_name": "John",
+    "last_name": "Doe",
+    "ownedProperties": [
+      {
+        "id": 10,
+        "address": "123 Main St",
+        "status": "active",
+        "tenants": [
+          {"id": 5, "first_name": "Alice", "email": "alice@example.com"}
+        ]
+      }
+    ],
+    "ownedVehicles": [
+      {"id": 20, "plate": "ABC-123", "make": "Toyota"}
+    ]
+  }
+}
+```
+
+**Key point**: `ownedProperties` comes from Relations service, `tenants` also from Relations service. Person and Property services know nothing about each other — Relations service defines these connections.
+
+### Multi-Entity Query
+
+Query multiple entities in one request:
+
+```json
+{
+  "query": {
+    "Person": {
+      "filters": {"id__in": [1, 2, 3]},
+      "fields": ["id", "first_name"]
+    },
+    "Property": {
+      "filters": {"status__eq": "active"},
+      "fields": ["id", "address"]
     }
   }
 }
@@ -467,30 +319,64 @@ Ref(
 }
 ```
 
+### HTTP Method Aliases
+
+For REST familiarity:
+
+| HTTP Alias | Operation |
+|------------|-----------|
+| `POST` | `create` |
+| `PATCH` | `update` |
+| `PUT` | `rewrite` |
+| `DELETE` | `delete` |
+
+```json
+{
+  "POST": {
+    "Person": {
+      "data": {"first_name": "John"}
+    }
+  }
+}
+```
+
 ---
 
 ## Transactions
 
-Execute multiple operations atomically with variable binding:
+Execute multiple operations atomically with variable binding between steps.
+
+### Why Transactions?
+
+Consider creating a Person with their Property and the ownership relation. Without transactions:
+
+1. Create Person → get `person_id`
+2. Create Property → get `property_id`
+3. Create Relationship with both IDs
+
+If step 3 fails, you have orphan records. With transactions:
 
 ```json
 {
   "transaction": {
     "steps": [
       {
-        "create": {
-          "Person": {
-            "data": {"first_name": "John", "gender": "MALE"},
-            "as": "$person"
-          }
-        }
+        "create": {"Person": {"data": {"first_name": "John"}}},
+        "as": "$person"
+      },
+      {
+        "create": {"Property": {"data": {"address": "123 Main St"}}},
+        "as": "$property"
       },
       {
         "create": {
-          "Property": {
+          "Relationship": {
             "data": {
-              "name": "New Property",
-              "owner_id": "$person.id"
+              "subject_type": "property",
+              "subject_id": "$property.id",
+              "object_type": "person",
+              "object_id": "$person.id",
+              "relationship_type": "property_owner"
             }
           }
         }
@@ -501,10 +387,190 @@ Execute multiple operations atomically with variable binding:
 }
 ```
 
-**Error handling modes:**
-- `rollback` — Undo all changes on error
-- `stop` — Stop at error, keep completed
-- `continue` — Skip errors, continue
+**Variable binding**: `$person.id` references the ID from step 1. The transaction executor resolves these before each step.
+
+### Error Handling
+
+| Mode | Behavior |
+|------|----------|
+| `rollback` | Undo all changes on any error (default) |
+| `stop` | Stop at error, keep completed steps |
+| `continue` | Skip errors, complete all possible steps |
+
+### Nested Mutations (Shorthand)
+
+For common patterns, use nested syntax — it compiles to a transaction automatically:
+
+```json
+{
+  "create": {
+    "Person": {
+      "data": {"first_name": "John"},
+      "nested": {
+        "ownedProperties": [
+          {"data": {"address": "123 Main St"}},
+          {"data": {"address": "456 Oak Ave"}}
+        ]
+      }
+    }
+  }
+}
+```
+
+This creates Person, two Properties, and two Relationships in one atomic operation.
+
+### Get-or-Create
+
+Find existing or create new:
+
+```json
+{
+  "get_or_create": {
+    "Person": {
+      "lookup": {"email__eq": "john@example.com"},
+      "defaults": {"first_name": "John", "last_name": "Doe"},
+      "response": ["id", "first_name", "email"]
+    }
+  }
+}
+```
+
+---
+
+## Installation & Setup
+
+### Install
+
+```bash
+pip install supergraph
+```
+
+### Initialize Project
+
+```bash
+supergraph init my-project
+cd my-project
+```
+
+Creates:
+```
+my-project/
+├── supergraph.yaml     # Configuration
+├── services/           # Microservices
+├── gateway/            # API gateway
+└── docker-compose.yml
+```
+
+### Create Services
+
+```bash
+supergraph create-service person --port 8001
+supergraph create-service property --port 8002
+supergraph create-service relations --port 8003
+```
+
+Each service has Django-like structure:
+```
+services/person/
+├── main.py              # FastAPI entry
+├── manage.py            # CLI commands
+├── models/models.py     # SQLAlchemy models
+├── views/viewsets.py    # Supergraph ViewSets
+└── settings/config.py   # Configuration
+```
+
+### Run
+
+```bash
+supergraph dev
+# or
+docker-compose up
+```
+
+---
+
+## ViewSet Reference
+
+### ModelViewSet — Basic Entity
+
+```python
+from supergraph import ModelViewSet, AccessConfig
+
+class PersonViewSet(ModelViewSet):
+    model = Person
+
+    # Optional: override auto-inferred values
+    service = "person"           # default: model name lowercase
+    resource = "/person"         # default: /model_name
+
+    # Field control
+    fields_exclude = ["password", "internal_note"]
+    filter_overrides = {
+        "email": ["eq", "icontains"],  # custom operators for this field
+    }
+    sortable_fields = {"id", "first_name", "created_at"}
+
+    # Pagination
+    pagination_default_limit = 50
+    pagination_max_limit = 200
+
+    # Access control (tenant isolation)
+    access = AccessConfig.direct(tenant_field="rc_id")
+```
+
+### Field Auto-Discovery
+
+Types and filters are inferred from SQLAlchemy columns:
+
+| SQLAlchemy Type | Supergraph Type | Default Filters |
+|-----------------|-----------------|-----------------|
+| `Integer` | `int` | `eq`, `in`, `gte`, `lte`, `isnull` |
+| `String`, `Text` | `string` | `eq`, `in`, `icontains`, `isnull` |
+| `Boolean` | `bool` | `eq`, `isnull` |
+| `Float`, `Numeric` | `float` | `eq`, `in`, `gte`, `lte`, `isnull` |
+| `DateTime` | `datetime` | `eq`, `gte`, `lte`, `isnull` |
+| `Enum` | `enum` | `eq`, `in`, `isnull` |
+| `JSON` | `json` | `eq`, `isnull` |
+
+### RelationsViewSet — Cross-Service Relations
+
+```python
+from supergraph import RelationsViewSet, AttachRelation
+
+class RelationshipViewSet(RelationsViewSet):
+    model = Relationship
+    service = "relations"
+
+    attach = [
+        # Person.ownedProperties -> [Property]
+        AttachRelation(
+            parent_entity="Person",
+            field_name="ownedProperties",
+            target_entity="Property",
+            relationship_type="property_owner",
+        ),
+        # Property.owners -> [Person]
+        AttachRelation(
+            parent_entity="Property",
+            field_name="owners",
+            target_entity="Person",
+            relationship_type="property_owner",
+        ),
+        # Property.tenants -> [Person]
+        AttachRelation(
+            parent_entity="Property",
+            field_name="tenants",
+            target_entity="Person",
+            relationship_type="property_tenant",
+        ),
+    ]
+```
+
+**AttachRelation defaults:**
+- `parent_id_field = "id"` — primary key of parent
+- `target_id_field = "id"` — primary key of target
+- `filters = {"status": "active"}` — only active relations
+- `cardinality = "many"` — returns array
 
 ---
 
@@ -522,43 +588,77 @@ gateway = Gateway(
         "relations": "http://relations:8003",
     },
     title="My API",
-    cors_origins=["http://localhost:3000"],
     playground=True,
-    playground_path="/playground",
 )
 
 app = gateway.app
-
-# Run with uvicorn
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
 ### Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | POST | Unified query/mutation endpoint |
+| `/` | POST | Unified query/mutation |
 | `/query` | POST | Execute queries |
-| `/__graph` | GET | Get compiled schema (JSON) |
-| `/__graph.ts` | GET | Get TypeScript types |
-| `/__graph.hcl` | GET | Get schema (HCL format) |
+| `/__graph` | GET | Compiled schema (JSON) |
+| `/__graph.ts` | GET | TypeScript types |
 | `/playground` | GET | Visual query builder |
 | `/health` | GET | Health check |
 
 ### REST-style Endpoints
 
-The gateway also exposes REST endpoints:
+```
+GET    /entity/Person                    # List
+GET    /entity/Person?filters={...}      # Filter
+POST   /entity/Person                    # Create
+PATCH  /entity/Person                    # Update
+PUT    /entity/Person                    # Replace
+DELETE /entity/Person                    # Delete
+```
 
-```
-GET    /entity/Person           # List
-GET    /entity/Person?filters={"id__eq":1}  # Get by filter
-POST   /entity/Person           # Create
-PATCH  /entity/Person           # Update
-PUT    /entity/Person           # Replace
-DELETE /entity/Person           # Delete
-```
+---
+
+## Playground
+
+Interactive visual interface for building queries and exploring the schema.
+
+### Schema Views
+
+**Graph View** — Interactive ERD diagram showing all entities and their relations across services. Click entities to see details, drag to explore connections.
+
+![Schema Graph](screens/01-schema-graph.png)
+
+**HCL View** — Human-readable schema in HCL format with outline navigation. Jump to any entity or section. Shows fields, types, filters, relations.
+
+![Schema HCL](screens/02-schema-hcl.png)
+
+**JSON View** — Full compiled schema in JSON. Useful for debugging and understanding the exact structure gateway uses.
+
+![Schema JSON](screens/03-schema-json.png)
+
+**TypeScript View** — Auto-generated TypeScript interfaces for all entities. Download or copy directly. Includes entity types, filter types, relation configs, and typed hooks.
+
+![Schema TypeScript](screens/04-schema-typescript.png)
+
+### Explorer
+
+**Query Mode (JSON Response)** — Build queries visually: select entity, pick fields, add filters, configure relations. See raw JSON response.
+
+![Explorer Query JSON](screens/05-explorer-query-json.png)
+
+**Query Mode (Table View)** — Same query, but results displayed in sortable, filterable table with server-side pagination. Click columns to sort, use pagination controls.
+
+![Explorer Query Table](screens/06-explorer-query-table.png)
+
+**Create Mode** — Visual form for creating records. Form fields are auto-generated from schema. FK fields have lookup buttons to search related entities.
+
+![Explorer Create](screens/07-explorer-create.png)
+
+**Transaction Mode** — Build multi-step transactions visually. Add steps, configure variable bindings (`$step1.id`), set error handling mode. See generated JSON and execute.
+
+![Explorer Transaction](screens/08-explorer-transaction.png)
+
+Access at: `http://localhost:8000/playground`
 
 ---
 
@@ -566,36 +666,31 @@ DELETE /entity/Person           # Delete
 
 ### Generate Types
 
-Download TypeScript types directly from your running backend:
+Download types from running backend:
 
 ```bash
-# Using curl
 curl http://localhost:8000/__graph.ts > src/generated/supergraph.ts
 
-# Using CLI (requires @supergraph/use-supergraph)
+# Or use CLI
 npx use-supergraph generate --url http://localhost:8000/__graph.ts --output ./src/generated
 ```
 
-### React Hooks (use-supergraph)
-
-Install the React hooks package:
+### React Hooks
 
 ```bash
 npm install @supergraph/use-supergraph @tanstack/react-query
 ```
 
-Generate typed hooks and use them:
-
 ```typescript
-import { PersonHooks, PropertyHooks } from './generated/supergraph'
+import { PersonHooks } from './generated/supergraph'
 
 function PersonList() {
   const { data, isLoading } = PersonHooks.useMany({
     fields: ['id', 'first_name', 'last_name'],  // Autocomplete!
-    filters: { is_active: true },
+    filters: { is_active__eq: true },
     relations: {
-      owned_properties: {
-        fields: ['id', 'name']
+      ownedProperties: {
+        fields: ['id', 'address']
       }
     },
     limit: 10
@@ -605,8 +700,10 @@ function PersonList() {
 
   return (
     <ul>
-      {data?.map(person => (
-        <li key={person.id}>{person.first_name} {person.last_name}</li>
+      {data?.items.map(person => (
+        <li key={person.id}>
+          {person.first_name} - {person.ownedProperties?.length} properties
+        </li>
       ))}
     </ul>
   )
@@ -615,201 +712,25 @@ function PersonList() {
 
 ---
 
-## IAM & Access Control
-
-### Tenant Isolation
-
-```python
-class PropertyViewSet(ModelViewSet):
-    model = Property
-
-    # Direct field-based isolation
-    access = AccessConfig.direct(tenant_field="rc_id")
-    # Adds automatic guard: rc_id IN principal.rc_ids
-```
-
-### Access Strategies
-
-```python
-# No isolation
-AccessConfig.none()
-
-# Direct field check
-AccessConfig.direct(tenant_field="rc_id")
-
-# Via relations (complex scenarios)
-AccessConfig.via_relations(tenant_field="rc_id")
-```
-
-### How Guards Work
-
-1. IAM service checks principal's permissions
-2. Returns scopes: `[{"field": "rc_id", "op": "in", "values": [1, 2]}]`
-3. Guards are injected into every query step
-4. Client cannot see or bypass guards
-
----
-
-## Service Internal API
-
-Each service must expose these endpoints for the gateway:
-
-### Schema Endpoint
-
-```python
-from supergraph import get_service_schema
-
-@app.get("/__schema")
-async def schema():
-    return get_service_schema([PersonViewSet, PropertyViewSet])
-```
-
-### Query Endpoint
-
-```python
-from supergraph import InternalQueryRequest, InternalQueryResponse
-
-@app.post("/internal/query")
-async def internal_query(
-    request: InternalQueryRequest,
-    session: AsyncSession = Depends(get_session)
-) -> InternalQueryResponse:
-    return await execute_internal_query(session, Person, request)
-```
-
-### Mutation Endpoints
-
-```python
-@app.post("/internal/create")
-@app.post("/internal/update")
-@app.post("/internal/rewrite")
-@app.post("/internal/delete")
-async def internal_mutation(request, session = Depends(get_session)):
-    return await execute_internal_mutation(session, Person, request)
-```
-
----
-
 ## CLI Commands
 
-### Project Commands
+### Project
 
 ```bash
 supergraph init [name]           # Initialize project
-supergraph create-service <name> # Create new service
+supergraph create-service <name> # Create service
 supergraph sync                  # Sync config → docker-compose
-supergraph dev                   # Run development server
+supergraph dev                   # Run development
 ```
 
-### Service Management (manage.py)
-
-Each service has a Django-like `manage.py`:
+### Service (manage.py)
 
 ```bash
-python manage.py makemigrations        # Create migration
-python manage.py migrate               # Apply migrations
-python manage.py showmigrations        # Show migration status
-python manage.py flushdata             # Clear data
-python manage.py dropdb                # Delete database
-python manage.py recreatedb            # Recreate database
-python manage.py rebuild               # Full rebuild
-python manage.py initial_data          # Load initial data (custom)
+python manage.py makemigrations  # Create migration
+python manage.py migrate         # Apply migrations
+python manage.py recreatedb      # Full database reset
+python manage.py initial_data    # Load seed data
 ```
-
-### Custom Commands
-
-Create custom commands in `manage/commands/`:
-
-```python
-# manage/commands/seed_data.py
-from manage.base import BaseCommand
-
-class SeedDataCommand(BaseCommand):
-    name = "seed_data"
-    help = "Seed database with test data"
-
-    def add_arguments(self, parser):
-        parser.add_argument("--count", type=int, default=100)
-
-    def handle(self, args) -> int:
-        print(f"Seeding {args.count} records...")
-        # Your logic here
-        return 0
-```
-
-```bash
-python manage.py seed_data --count 500
-```
-
----
-
-## Configuration
-
-### supergraph.yaml
-
-```yaml
-version: 1
-project: my-app
-
-gateway:
-  port: 8000
-
-services:
-  person:
-    port: 8001
-    database: person_db
-  property:
-    port: 8002
-    database: property_db
-  relations:
-    port: 8003
-    database: relations_db
-
-postgres:
-  host: postgres
-  port: 5432
-  user: postgres
-  password: postgres
-```
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                          Gateway                                 │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  Request → Parser → Validator → Planner → Executor → Response││
-│  │                        │                     │               ││
-│  │                   IAM Guard              Service             ││
-│  │                   Injection              Clients             ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-   ┌──────────┐        ┌──────────┐        ┌──────────┐
-   │  Person  │        │ Property │        │Relations │
-   │ Service  │        │ Service  │        │ Service  │
-   │   :8001  │        │   :8002  │        │   :8003  │
-   └──────────┘        └──────────┘        └──────────┘
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              ▼
-                        ┌──────────┐
-                        │ Postgres │
-                        │    DB    │
-                        └──────────┘
-```
-
-**Execution Flow:**
-1. Client sends JSON query to Gateway
-2. Gateway validates against compiled schema
-3. IAM injects guard filters
-4. Planner builds execution DAG
-5. Executor runs steps in topological order
-6. Assembler stitches results
-7. Response returned to client
 
 ---
 

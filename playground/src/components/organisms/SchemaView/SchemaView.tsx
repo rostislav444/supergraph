@@ -86,9 +86,7 @@ export function SchemaView({ graph, viewMode = 'graph' }: SchemaViewProps) {
       ) : (
         <div className="flex-1 overflow-hidden bg-[#0d1117]">
           {viewMode === 'hcl' ? (
-            <div className="h-full overflow-auto p-4">
-              <HclHighlighter code={hcl} />
-            </div>
+            <HclHighlighter code={hcl} />
           ) : (
             <JsonHighlighter data={graph} />
           )}

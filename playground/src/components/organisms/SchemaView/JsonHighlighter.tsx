@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useCallback } from 'react'
+import React, { useRef, useMemo, useCallback, useState, useEffect } from 'react'
 
 interface JsonHighlighterProps {
   data: unknown
@@ -309,6 +309,7 @@ function extractNavItems(data: unknown): NavItem[] {
 
 export function JsonHighlighter({ data }: JsonHighlighterProps) {
   const codeRef = useRef<HTMLPreElement>(null)
+  const navRef = useRef<HTMLDivElement>(null)
 
   // Reset and render
   globalKey = 0
@@ -319,6 +320,95 @@ export function JsonHighlighter({ data }: JsonHighlighterProps) {
 
   // Extract navigation items
   const navItems = useMemo(() => extractNavItems(data), [data])
+
+  // Active entity tracking
+  const [activeEntity, setActiveEntity] = useState<string | null>(null)
+
+  // Create entity line map for quick lookup
+  const entityLineMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    navItems.forEach((service) => {
+      service.children?.forEach((entity) => {
+        const lineNum = savedLineMap.get(entity.path)
+        if (lineNum) {
+          map[entity.name] = lineNum
+        }
+      })
+    })
+    return map
+  }, [navItems, savedLineMap])
+
+  // Track scroll position to highlight active entity (with debounce)
+  useEffect(() => {
+    const codeEl = codeRef.current
+    if (!codeEl) return
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const handleScroll = () => {
+      if (timeoutId) clearTimeout(timeoutId)
+
+      timeoutId = setTimeout(() => {
+        const lineHeight = 20
+        const scrollTop = codeEl.scrollTop
+        const currentLine = Math.floor(scrollTop / lineHeight) + 1
+
+        // Find the closest entity that starts at or before the current line
+        let closestEntity: string | null = null
+        let closestLine = 0
+
+        for (const [entityName, lineNum] of Object.entries(entityLineMap)) {
+          if (lineNum <= currentLine + 5 && lineNum > closestLine) {
+            closestLine = lineNum
+            closestEntity = entityName
+          }
+        }
+
+        if (closestEntity !== activeEntity) {
+          setActiveEntity(closestEntity)
+        }
+      }, 100)
+    }
+
+    // Initial check (immediate)
+    const lineHeight = 20
+    const scrollTop = codeEl.scrollTop
+    const currentLine = Math.floor(scrollTop / lineHeight) + 1
+    let closestEntity: string | null = null
+    let closestLine = 0
+    for (const [entityName, lineNum] of Object.entries(entityLineMap)) {
+      if (lineNum <= currentLine + 5 && lineNum > closestLine) {
+        closestLine = lineNum
+        closestEntity = entityName
+      }
+    }
+    setActiveEntity(closestEntity)
+
+    codeEl.addEventListener('scroll', handleScroll)
+    return () => {
+      codeEl.removeEventListener('scroll', handleScroll)
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [entityLineMap])
+
+  // Auto-scroll nav sidebar to keep active entity at ~20% from top
+  useEffect(() => {
+    if (!activeEntity || !navRef.current) return
+
+    const activeButton = navRef.current.querySelector(`[data-entity="${activeEntity}"]`) as HTMLElement
+    if (activeButton) {
+      const navEl = navRef.current
+      const targetPosition = navEl.clientHeight * 0.2 // 20% from top
+
+      const buttonTopInNav = activeButton.offsetTop
+      const targetScrollTop = buttonTopInNav - targetPosition
+
+      navEl.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: 'smooth',
+      })
+    }
+  }, [activeEntity])
 
   // Scroll to line
   const scrollToPath = useCallback((path: string) => {
@@ -388,30 +478,50 @@ export function JsonHighlighter({ data }: JsonHighlighterProps) {
         </div>
 
         {/* Navigation sidebar */}
-        <div className="dark-scrollbar w-56 flex-shrink-0 border-l border-gray-800 bg-[#161b22] overflow-auto">
+        <div ref={navRef} className="dark-scrollbar w-56 flex-shrink-0 border-l border-gray-800 bg-[#161b22] overflow-auto">
           <div className="p-2 border-b border-gray-800">
             <span className="text-xs font-medium text-gray-400">OUTLINE</span>
           </div>
           <div className="p-2">
-            {navItems.map((service) => (
-              <div key={service.name} className="mb-2">
-                <div className="flex items-center gap-1 text-xs text-gray-500 font-medium mb-1">
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                  </svg>
-                  {service.name}
-                </div>
-                {service.children?.map((entity) => (
-                  <button
-                    key={entity.name}
-                    onClick={() => scrollToPath(entity.path)}
-                    className="w-full text-left px-2 py-0.5 text-xs text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors truncate"
+            {navItems.map((service) => {
+              const isActiveService = service.children?.some((e) => e.name === activeEntity)
+              return (
+                <div key={service.name} className="mb-2">
+                  <div
+                    className={`flex items-center gap-1 text-xs font-medium mb-1 transition-colors ${
+                      isActiveService ? 'text-blue-400' : 'text-gray-500'
+                    }`}
                   >
-                    {entity.name}
-                  </button>
-                ))}
-              </div>
-            ))}
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                      />
+                    </svg>
+                    {service.name}
+                  </div>
+                  {service.children?.map((entity) => {
+                    const isActive = entity.name === activeEntity
+                    return (
+                      <button
+                        key={entity.name}
+                        data-entity={entity.name}
+                        onClick={() => scrollToPath(entity.path)}
+                        className={`w-full text-left px-2 py-0.5 text-xs rounded transition-colors truncate ${
+                          isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                        }`}
+                      >
+                        {entity.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>

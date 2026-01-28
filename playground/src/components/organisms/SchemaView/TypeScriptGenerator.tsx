@@ -1,3 +1,4 @@
+import React from 'react'
 import type { Graph, Field, Relation } from '@/types'
 
 interface TypeScriptGeneratorProps {
@@ -170,6 +171,63 @@ function generateTypeScript(graph: Graph): string {
   return lines.join('\n')
 }
 
+// Helper to highlight type expressions
+function highlightType(typeStr: string, startKey: number): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  let key = startKey
+
+  // Split by pipe for union types
+  const unionParts = typeStr.split(/\s*\|\s*/)
+
+  unionParts.forEach((part, idx) => {
+    const trimmed = part.trim()
+
+    // Built-in types
+    if (['string', 'number', 'boolean', 'null', 'unknown'].includes(trimmed)) {
+      parts.push(<span key={key++} style={{ color: '#79c0ff' }}>{trimmed}</span>)
+    }
+    // String literal
+    else if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+      parts.push(<span key={key++} style={{ color: '#a5d6ff' }}>{trimmed}</span>)
+    }
+    // Generic types like Omit<X, 'id'>, Record<string, unknown>
+    else if (trimmed.match(/^(Omit|Partial|Pick|Record|Array)</)) {
+      const match = trimmed.match(/^(\w+)<(.+)>$/)
+      if (match) {
+        const [, genericName, inner] = match
+        parts.push(<span key={key++} style={{ color: '#ffa657' }}>{genericName}</span>)
+        parts.push(<span key={key++}>{'<'}</span>)
+        parts.push(...highlightType(inner, key))
+        key += 50
+        parts.push(<span key={key++}>{'>'}</span>)
+      } else {
+        parts.push(<span key={key++} style={{ color: '#ffa657' }}>{trimmed}</span>)
+      }
+    }
+    // Array type like Entity[]
+    else if (trimmed.endsWith('[]')) {
+      const baseName = trimmed.slice(0, -2)
+      parts.push(<span key={key++} style={{ color: '#ffa657' }}>{baseName}</span>)
+      parts.push(<span key={key++}>[]</span>)
+    }
+    // Entity reference
+    else if (trimmed.match(/^[A-Z]\w*$/)) {
+      parts.push(<span key={key++} style={{ color: '#ffa657' }}>{trimmed}</span>)
+    }
+    // Other (like comma in generics)
+    else {
+      parts.push(<span key={key++}>{trimmed}</span>)
+    }
+
+    // Add pipe between union parts
+    if (idx < unionParts.length - 1) {
+      parts.push(<span key={key++} style={{ color: '#ff7b72' }}> | </span>)
+    }
+  })
+
+  return parts
+}
+
 export function TypeScriptGenerator({ graph }: TypeScriptGeneratorProps) {
   const tsCode = generateTypeScript(graph)
 
@@ -241,9 +299,6 @@ export function TypeScriptGenerator({ graph }: TypeScriptGeneratorProps) {
         <pre className="font-mono text-xs leading-relaxed">
           <code>
             {tsCode.split('\n').map((line, i) => {
-              // GitHub Dark syntax highlighting
-              let highlighted = line
-
               // Empty lines
               if (!line.trim()) {
                 return <div key={i} className="h-4">&nbsp;</div>
@@ -251,87 +306,110 @@ export function TypeScriptGenerator({ graph }: TypeScriptGeneratorProps) {
 
               // Comments - #8b949e
               if (line.trim().startsWith('//')) {
-                // Highlight === lines differently
                 if (line.includes('===')) {
                   return <div key={i} style={{ color: '#6e7681' }}>{line}</div>
                 }
                 return <div key={i} style={{ color: '#8b949e' }}>{line}</div>
               }
 
-              // Escape HTML
-              highlighted = highlighted
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
+              // Build highlighted line using spans
+              const parts: React.ReactNode[] = []
+              let key = 0
 
-              // Keywords - #ff7b72 (red/pink)
-              highlighted = highlighted.replace(
-                /\b(export|interface|type|extends|const|as|readonly)\b/g,
-                '<span style="color:#ff7b72">$1</span>'
-              )
+              // Interface/type declaration line
+              const declMatch = line.match(/^(export\s+)(interface|type)\s+(\w+)(\s+extends\s+)?(\w+)?(.*)$/)
+              if (declMatch) {
+                const [, exportKw, keyword, name, extendsKw, parentName, rest] = declMatch
+                parts.push(<span key={key++} style={{ color: '#ff7b72' }}>{exportKw}</span>)
+                parts.push(<span key={key++} style={{ color: '#ff7b72' }}>{keyword}</span>)
+                parts.push(<span key={key++}> </span>)
+                parts.push(<span key={key++} style={{ color: '#ffa657' }}>{name}</span>)
+                if (extendsKw) {
+                  parts.push(<span key={key++} style={{ color: '#ff7b72' }}>{extendsKw}</span>)
+                  if (parentName) {
+                    parts.push(<span key={key++} style={{ color: '#ffa657' }}>{parentName}</span>)
+                  }
+                }
+                parts.push(<span key={key++} style={{ color: '#c9d1d9' }}>{rest}</span>)
+                return <div key={i} style={{ color: '#c9d1d9' }}>{parts}</div>
+              }
 
-              // Type/Interface names after keywords - #ffa657 (orange)
-              highlighted = highlighted.replace(
-                /(<span style="color:#ff7b72">(?:interface|type)<\/span>)\s+(\w+)/g,
-                '$1 <span style="color:#ffa657">$2</span>'
-              )
+              // Property line (indented with field: type)
+              const propMatch = line.match(/^(\s+)(\w+)(\?)?:\s*(.+)$/)
+              if (propMatch) {
+                const [, indent, fieldName, optional, typeAndComment] = propMatch
+                parts.push(<span key={key++}>{indent}</span>)
+                parts.push(<span key={key++} style={{ color: '#c9d1d9' }}>{fieldName}</span>)
+                if (optional) {
+                  parts.push(<span key={key++} style={{ color: '#ff7b72' }}>?</span>)
+                }
+                parts.push(<span key={key++}>: </span>)
 
-              // Entity names after extends - #ffa657 (orange)
-              highlighted = highlighted.replace(
-                /(<span style="color:#ff7b72">extends<\/span>)\s+(\w+)/g,
-                '$1 <span style="color:#ffa657">$2</span>'
-              )
+                // Parse type part (may include comment)
+                const commentIdx = typeAndComment.indexOf('//')
+                const typePart = commentIdx >= 0 ? typeAndComment.slice(0, commentIdx).trim() : typeAndComment
+                const commentPart = commentIdx >= 0 ? typeAndComment.slice(commentIdx) : ''
 
-              // Generic types like Omit<X, 'id'>, Partial<X>, Record<X, Y>
-              highlighted = highlighted.replace(
-                /\b(Omit|Partial|Pick|Record|Array)&lt;/g,
-                '<span style="color:#ffa657">$1</span>&lt;'
-              )
+                // Highlight type
+                parts.push(...highlightType(typePart, key))
+                key += 100 // Reserve keys for type highlighting
 
-              // Built-in types - #79c0ff (blue)
-              highlighted = highlighted.replace(
-                /:\s*(string|number|boolean|null|unknown)\b/g,
-                ': <span style="color:#79c0ff">$1</span>'
-              )
+                if (commentPart) {
+                  parts.push(<span key={key++} style={{ color: '#8b949e' }}> {commentPart}</span>)
+                }
 
-              // Type references in union/array - #ffa657
-              highlighted = highlighted.replace(
-                /(\[\])(?!\w)/g,
-                '<span style="color:#c9d1d9">$1</span>'
-              )
+                return <div key={i} style={{ color: '#c9d1d9' }}>{parts}</div>
+              }
 
-              // String literals in types - #a5d6ff (light blue)
-              highlighted = highlighted.replace(
-                /'([^']+)'/g,
-                '<span style="color:#a5d6ff">\'$1\'</span>'
-              )
+              // Type alias line: export type X = ...
+              const typeAliasMatch = line.match(/^(export\s+type\s+)(\w+)(\s*=\s*)(.+)$/)
+              if (typeAliasMatch) {
+                const [, prefix, typeName, eq, value] = typeAliasMatch
+                parts.push(<span key={key++} style={{ color: '#ff7b72' }}>export type </span>)
+                parts.push(<span key={key++} style={{ color: '#ffa657' }}>{typeName}</span>)
+                parts.push(<span key={key++}>{eq}</span>)
+                parts.push(...highlightType(value, key))
+                return <div key={i} style={{ color: '#c9d1d9' }}>{parts}</div>
+              }
 
-              // Property names - #c9d1d9 (handled by default)
-              // Optional marker ? - #ff7b72
-              highlighted = highlighted.replace(
-                /(\w+)(\?)?:/g,
-                '<span style="color:#c9d1d9">$1</span>$2:'
-              )
+              // Const declaration
+              const constMatch = line.match(/^(export\s+const\s+)(\w+)(\s*=\s*)(.+)$/)
+              if (constMatch) {
+                const [, prefix, name, eq, value] = constMatch
+                parts.push(<span key={key++} style={{ color: '#ff7b72' }}>export const </span>)
+                parts.push(<span key={key++} style={{ color: '#ffa657' }}>{name}</span>)
+                parts.push(<span key={key++}>{eq}</span>)
+                parts.push(<span key={key++} style={{ color: '#c9d1d9' }}>{value}</span>)
+                return <div key={i} style={{ color: '#c9d1d9' }}>{parts}</div>
+              }
 
-              // Brackets and punctuation - #c9d1d9
-              highlighted = highlighted.replace(
-                /([{}[\]()])/g,
-                '<span style="color:#c9d1d9">$1</span>'
-              )
+              // Object property in const: '  'key': [values] as const,'
+              const objPropMatch = line.match(/^(\s+)'([^']+)':\s*\[(.+)\]\s*(as const)?,?$/)
+              if (objPropMatch) {
+                const [, indent, propName, values, asConst] = objPropMatch
+                parts.push(<span key={key++}>{indent}</span>)
+                parts.push(<span key={key++} style={{ color: '#a5d6ff' }}>'{propName}'</span>)
+                parts.push(<span key={key++}>: [</span>)
+                // Highlight string values
+                const valueItems = values.split(/,\s*/)
+                valueItems.forEach((v, idx) => {
+                  if (v.startsWith("'")) {
+                    parts.push(<span key={key++} style={{ color: '#a5d6ff' }}>{v}</span>)
+                  } else {
+                    parts.push(<span key={key++}>{v}</span>)
+                  }
+                  if (idx < valueItems.length - 1) parts.push(<span key={key++}>, </span>)
+                })
+                parts.push(<span key={key++}>]</span>)
+                if (asConst) {
+                  parts.push(<span key={key++} style={{ color: '#ff7b72' }}> as const</span>)
+                }
+                parts.push(<span key={key++}>,</span>)
+                return <div key={i} style={{ color: '#c9d1d9' }}>{parts}</div>
+              }
 
-              // Pipe operator for unions - #ff7b72
-              highlighted = highlighted.replace(
-                / \| /g,
-                ' <span style="color:#ff7b72">|</span> '
-              )
-
-              return (
-                <div
-                  key={i}
-                  style={{ color: '#c9d1d9' }}
-                  dangerouslySetInnerHTML={{ __html: highlighted }}
-                />
-              )
+              // Closing brace or other simple lines
+              return <div key={i} style={{ color: '#c9d1d9' }}>{line}</div>
             })}
           </code>
         </pre>

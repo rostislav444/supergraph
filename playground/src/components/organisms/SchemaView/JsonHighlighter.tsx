@@ -342,55 +342,79 @@ export function JsonHighlighter({ data }: JsonHighlighterProps) {
     return nums
   }, [totalLines])
 
+  // Dark scrollbar styles
+  const scrollbarStyles = `
+    .dark-scrollbar::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .dark-scrollbar::-webkit-scrollbar-track {
+      background: #161b22;
+    }
+    .dark-scrollbar::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 4px;
+    }
+    .dark-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+    .dark-scrollbar::-webkit-scrollbar-corner {
+      background: #161b22;
+    }
+  `
+
   return (
-    <div className="flex h-full">
-      {/* Main code area with line numbers */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Line numbers */}
-        <div
-          className="flex-shrink-0 py-0 font-mono text-xs leading-[20px] bg-[#0d1117] border-r border-gray-800"
-          style={{ minWidth: '50px' }}
-        >
-          {lineNumbers}
+    <>
+      <style>{scrollbarStyles}</style>
+      <div className="flex h-full">
+        {/* Main code area with line numbers */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Line numbers */}
+          <div
+            className="flex-shrink-0 font-mono text-xs leading-[20px] bg-[#0d1117] border-r border-gray-800 overflow-hidden"
+            style={{ minWidth: '50px' }}
+          >
+            {lineNumbers}
+          </div>
+
+          {/* Code */}
+          <pre
+            ref={codeRef}
+            className="dark-scrollbar flex-1 font-mono text-xs leading-[20px] overflow-auto pl-3 m-0"
+            style={{ color: COLORS.punctuation }}
+          >
+            <code>{parts}</code>
+          </pre>
         </div>
 
-        {/* Code */}
-        <pre
-          ref={codeRef}
-          className="flex-1 font-mono text-xs leading-[20px] overflow-auto pl-4"
-          style={{ color: COLORS.punctuation }}
-        >
-          <code>{parts}</code>
-        </pre>
-      </div>
-
-      {/* Navigation sidebar */}
-      <div className="w-56 flex-shrink-0 border-l border-gray-800 bg-[#161b22] overflow-auto">
-        <div className="p-2 border-b border-gray-800">
-          <span className="text-xs font-medium text-gray-400">OUTLINE</span>
-        </div>
-        <div className="p-2">
-          {navItems.map((service) => (
-            <div key={service.name} className="mb-2">
-              <div className="flex items-center gap-1 text-xs text-gray-500 font-medium mb-1">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
-                {service.name}
+        {/* Navigation sidebar */}
+        <div className="dark-scrollbar w-56 flex-shrink-0 border-l border-gray-800 bg-[#161b22] overflow-auto">
+          <div className="p-2 border-b border-gray-800">
+            <span className="text-xs font-medium text-gray-400">OUTLINE</span>
+          </div>
+          <div className="p-2">
+            {navItems.map((service) => (
+              <div key={service.name} className="mb-2">
+                <div className="flex items-center gap-1 text-xs text-gray-500 font-medium mb-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                  {service.name}
+                </div>
+                {service.children?.map((entity) => (
+                  <button
+                    key={entity.name}
+                    onClick={() => scrollToPath(entity.path)}
+                    className="w-full text-left px-2 py-0.5 text-xs text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors truncate"
+                  >
+                    {entity.name}
+                  </button>
+                ))}
               </div>
-              {service.children?.map((entity) => (
-                <button
-                  key={entity.name}
-                  onClick={() => scrollToPath(entity.path)}
-                  className="w-full text-left px-2 py-0.5 text-xs text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors truncate"
-                >
-                  {entity.name}
-                </button>
-              ))}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }

@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useState, useEffect, useRef } from 'react'
 import {
   ReactFlow,
   Node,
@@ -14,32 +14,33 @@ import {
   Handle,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import ELK from 'elkjs/lib/elk.bundled.js'
 import type { Graph, Relation } from '@/types'
 
 interface SchemaGraphProps {
   graph: Graph
 }
 
+// Layout types
+type LayoutType = 'elk-layered'
+
 // Service colors for visual distinction
 const SERVICE_COLOR_PALETTE = [
-  { border: '#3b82f6', header: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' }, // blue
-  { border: '#a855f7', header: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' }, // purple
-  { border: '#10b981', header: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' }, // emerald
-  { border: '#f97316', header: '#f97316', bg: 'rgba(249, 115, 22, 0.15)' }, // orange
-  { border: '#06b6d4', header: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)' }, // cyan
-  { border: '#ec4899', header: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)' }, // pink
-  { border: '#eab308', header: '#eab308', bg: 'rgba(234, 179, 8, 0.15)' }, // yellow
-  { border: '#ef4444', header: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' }, // red
+  { border: '#3b82f6', header: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)' }, // blue
+  { border: '#a855f7', header: '#a855f7', bg: 'rgba(168, 85, 247, 0.08)' }, // purple
+  { border: '#10b981', header: '#10b981', bg: 'rgba(16, 185, 129, 0.08)' }, // emerald
+  { border: '#f97316', header: '#f97316', bg: 'rgba(249, 115, 22, 0.08)' }, // orange
+  { border: '#06b6d4', header: '#06b6d4', bg: 'rgba(6, 182, 212, 0.08)' }, // cyan
+  { border: '#ec4899', header: '#ec4899', bg: 'rgba(236, 72, 153, 0.08)' }, // pink
+  { border: '#eab308', header: '#eab308', bg: 'rgba(234, 179, 8, 0.08)' }, // yellow
+  { border: '#ef4444', header: '#ef4444', bg: 'rgba(239, 68, 68, 0.08)' }, // red
 ]
 
 const NODE_WIDTH = 220
 const NODE_HEADER_HEIGHT = 44
 const FIELD_HEIGHT = 18
 const NODE_PADDING = 12
-const NODE_GAP_X = 50
-const NODE_GAP_Y = 30
-const GROUP_GAP = 80
-const GROUP_PADDING = 30
+const GROUP_PADDING = 40
 
 // Field type colors
 const TYPE_COLORS: Record<string, string> = {
@@ -71,7 +72,7 @@ function EntityNode({
 }: {
   data: {
     label: string
-    fields: Array<{ name: string; type: string; isFk?: boolean; fkTarget?: string }>
+    fields: Array<{ name: string; type: string; isFk?: boolean; fkTarget?: string; isPolymorphicFk?: boolean }>
     service: string
     color: (typeof SERVICE_COLOR_PALETTE)[0]
   }
@@ -95,66 +96,125 @@ function EntityNode({
       </div>
       {/* Fields - show all fields without scrolling */}
       <div className="px-2 py-1.5">
-        {data.fields.map((field, index) => (
-          <div
-            key={field.name}
-            className="text-[10px] py-0.5 font-mono flex items-center gap-1 relative"
-            style={{ height: FIELD_HEIGHT }}
-          >
-            {/* Target handle for 'id' field - receives FK connections */}
-            {field.name === 'id' && (
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={`field-id`}
-                style={{
-                  background: '#ef4444',
-                  width: 6,
-                  height: 6,
-                  left: -14,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                }}
-              />
-            )}
-            {/* Source handle for FK fields - sends connections */}
-            {field.isFk && (
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={`field-${field.name}`}
-                style={{
-                  background: '#fbbf24',
-                  width: 6,
-                  height: 6,
-                  right: -14,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                }}
-              />
-            )}
-            {field.isFk && (
-              <span className="text-amber-400 text-[8px]" title={`FK → ${field.fkTarget}`}>
-                🔑
-              </span>
-            )}
-            <span style={{ color: field.isFk ? '#fbbf24' : '#9ca3af' }}>
-              {field.name}
-            </span>
-            <span
-              className="text-[9px] ml-auto font-semibold"
-              style={{ color: field.isFk ? '#fbbf24' : getTypeColor(field.type) }}
+        {data.fields.map((field) => {
+          // Polymorphic FK: subject_id receives (target), object_id sends (source)
+          const isSubjectId = field.name === 'subject_id' && field.isPolymorphicFk
+          const isObjectId = field.name === 'object_id' && field.isPolymorphicFk
+
+          return (
+            <div
+              key={field.name}
+              className="text-[10px] py-0.5 font-mono flex items-center gap-1 relative"
+              style={{ height: FIELD_HEIGHT }}
             >
-              {field.type}
-            </span>
-          </div>
-        ))}
+              {/* Target handle for 'id' field - receives FK connections */}
+              {field.name === 'id' && (
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id="field-id-target"
+                  style={{
+                    background: '#ef4444',
+                    width: 6,
+                    height: 6,
+                    left: -14,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                  }}
+                />
+              )}
+              {/* Source handle for 'id' field - sends to Relationship.subject_id */}
+              {field.name === 'id' && (
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id="field-id"
+                  style={{
+                    background: '#f472b6', // Pink - matches subject_id color
+                    width: 6,
+                    height: 6,
+                    right: -14,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                  }}
+                />
+              )}
+              {/* Target handle for subject_id (polymorphic incoming) */}
+              {isSubjectId && (
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id="field-subject_id"
+                  style={{
+                    background: '#f472b6', // Pink
+                    width: 6,
+                    height: 6,
+                    left: -14,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                  }}
+                />
+              )}
+              {/* Source handle for object_id (polymorphic outgoing) */}
+              {isObjectId && (
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id="field-object_id"
+                  style={{
+                    background: '#a78bfa', // Violet
+                    width: 6,
+                    height: 6,
+                    right: -14,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                  }}
+                />
+              )}
+              {/* Source handle for regular FK fields - sends connections */}
+              {field.isFk && !field.isPolymorphicFk && (
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={`field-${field.name}`}
+                  style={{
+                    background: '#fbbf24',
+                    width: 6,
+                    height: 6,
+                    right: -14,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                  }}
+                />
+              )}
+              {/* FK indicator */}
+              {field.isFk && (
+                <span
+                  className="text-[8px]"
+                  style={{ color: field.isPolymorphicFk ? '#f472b6' : '#fbbf24' }}
+                  title={`FK → ${field.fkTarget}`}
+                >
+                  {field.isPolymorphicFk ? '🔗' : '🔑'}
+                </span>
+              )}
+              <span style={{ color: field.isFk ? (field.isPolymorphicFk ? '#f472b6' : '#fbbf24') : '#9ca3af' }}>
+                {field.name}
+              </span>
+              <span
+                className="text-[9px] ml-auto font-semibold"
+                style={{ color: field.isFk ? (field.isPolymorphicFk ? '#a78bfa' : '#fbbf24') : getTypeColor(field.type) }}
+              >
+                {field.type}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
-// Service group node (background)
+// Service group node (background for microservice)
 function ServiceGroupNode({
   data,
 }: {
@@ -176,10 +236,10 @@ function ServiceGroupNode({
       }}
     >
       <div
-        className="px-3 py-1.5 text-sm font-semibold"
+        className="px-3 py-2 text-sm font-semibold"
         style={{ color: data.color.border }}
       >
-        {data.label}
+        📦 {data.label}
       </div>
     </div>
   )
@@ -190,17 +250,71 @@ const nodeTypes = {
   serviceGroup: ServiceGroupNode,
 }
 
-// Layout grouped by services with dynamic node heights
-function getLayoutedElements(
+// ELK instance
+const elk = new ELK()
+
+// ELK layout options for internal group layout
+const elkLayoutOptions = {
+  'elk-layered': {
+    'elk.algorithm': 'layered',
+    'elk.direction': 'RIGHT',
+    'elk.spacing.nodeNode': '40',
+    'elk.layered.spacing.nodeNodeBetweenLayers': '60',
+    'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+    'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+    'elk.padding': `[top=${GROUP_PADDING + 10},left=${GROUP_PADDING},bottom=${GROUP_PADDING},right=${GROUP_PADDING}]`,
+  },
+}
+
+interface ElkEdge {
+  id: string
+  sources: string[]
+  targets: string[]
+}
+
+
+// Layout each service group internally using ELK
+async function layoutServiceGroup(
+  serviceNodes: Node[],
+  layoutType: LayoutType
+): Promise<{ nodes: Array<{ id: string; x: number; y: number; width: number; height: number }>; width: number; height: number }> {
+  const elkGraph = {
+    id: 'group',
+    layoutOptions: elkLayoutOptions[layoutType],
+    children: serviceNodes.map(node => ({
+      id: node.id,
+      width: NODE_WIDTH,
+      height: calculateNodeHeight((node.data.fields as Array<unknown>).length),
+    })),
+    edges: [] as ElkEdge[],
+  }
+
+  const layouted = await elk.layout(elkGraph)
+
+  let maxX = 0, maxY = 0
+  const nodes = layouted.children?.map(child => {
+    const x = child.x ?? 0
+    const y = child.y ?? 0
+    const w = child.width ?? NODE_WIDTH
+    const h = child.height ?? 100
+    maxX = Math.max(maxX, x + w)
+    maxY = Math.max(maxY, y + h)
+    return { id: child.id, x, y, width: w, height: h }
+  }) || []
+
+  return { nodes, width: maxX + GROUP_PADDING * 2, height: maxY + GROUP_PADDING * 2 + 30 }
+}
+
+// Apply mind-map style layout: Relations in center, others around it
+async function applyElkLayout(
   nodes: Node[],
   edges: Edge[],
-  direction: 'TB' | 'LR' = 'LR'
-): { nodes: Node[]; edges: Edge[] } {
+  layoutType: LayoutType,
+  serviceColorMap: Record<string, (typeof SERVICE_COLOR_PALETTE)[0]>
+): Promise<{ nodes: Node[]; edges: Edge[] }> {
   if (nodes.length === 0) return { nodes, edges }
 
-  // Separate entity nodes from group nodes
   const entityNodes = nodes.filter(n => n.type === 'entity')
-  const groupNodes = nodes.filter(n => n.type === 'serviceGroup')
 
   // Group entities by service
   const serviceGroups: Record<string, Node[]> = {}
@@ -211,97 +325,241 @@ function getLayoutedElements(
   })
 
   const services = Object.keys(serviceGroups)
-  const layoutedNodes: Node[] = []
 
-  // Calculate grid layout for each service group
-  let currentX = 0
-  let currentY = 0
-  let maxRowHeight = 0
-  const GROUPS_PER_ROW = direction === 'LR' ? 4 : 3
+  // Count connections between services (through edges)
+  const serviceConnections: Record<string, Set<string>> = {}
+  services.forEach(s => serviceConnections[s] = new Set())
 
-  services.forEach((service, serviceIndex) => {
-    const nodesInGroup = serviceGroups[service]
-
-    // Calculate grid for nodes within this group
-    const cols = Math.ceil(Math.sqrt(nodesInGroup.length))
-    const rows = Math.ceil(nodesInGroup.length / cols)
-
-    // Calculate max height for each row based on field counts
-    const rowHeights: number[] = []
-    for (let row = 0; row < rows; row++) {
-      let maxHeightInRow = 0
-      for (let col = 0; col < cols; col++) {
-        const index = row * cols + col
-        if (index < nodesInGroup.length) {
-          const node = nodesInGroup[index]
-          const fieldCount = (node.data.fields as Array<unknown>).length
-          const nodeHeight = calculateNodeHeight(fieldCount)
-          maxHeightInRow = Math.max(maxHeightInRow, nodeHeight)
-        }
+  edges.forEach(edge => {
+    const sourceNode = entityNodes.find(n => n.id === edge.source)
+    const targetNode = entityNodes.find(n => n.id === edge.target)
+    if (sourceNode && targetNode) {
+      const sourceService = sourceNode.data.service as string
+      const targetService = targetNode.data.service as string
+      if (sourceService !== targetService) {
+        serviceConnections[sourceService].add(targetService)
+        serviceConnections[targetService].add(sourceService)
       }
-      rowHeights.push(maxHeightInRow)
-    }
-
-    const totalNodesHeight = rowHeights.reduce((sum, h) => sum + h, 0) + (rows - 1) * NODE_GAP_Y
-    const groupWidth = cols * NODE_WIDTH + (cols - 1) * NODE_GAP_X + GROUP_PADDING * 2
-    const groupHeight = totalNodesHeight + GROUP_PADDING * 2 + 30 // +30 for header
-
-    // Position nodes within the group
-    nodesInGroup.forEach((node, index) => {
-      const col = index % cols
-      const row = Math.floor(index / cols)
-
-      // Calculate Y position based on previous row heights
-      let yOffset = 0
-      for (let r = 0; r < row; r++) {
-        yOffset += rowHeights[r] + NODE_GAP_Y
-      }
-
-      const x = currentX + GROUP_PADDING + col * (NODE_WIDTH + NODE_GAP_X)
-      const y = currentY + GROUP_PADDING + 30 + yOffset
-
-      layoutedNodes.push({
-        ...node,
-        position: { x, y },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-      })
-    })
-
-    // Find and update the corresponding group node
-    const groupNode = groupNodes.find(g => g.id === `group-${service}`)
-    if (groupNode) {
-      layoutedNodes.push({
-        ...groupNode,
-        position: { x: currentX, y: currentY },
-        data: {
-          ...groupNode.data,
-          width: groupWidth,
-          height: groupHeight,
-        },
-      })
-    }
-
-    maxRowHeight = Math.max(maxRowHeight, groupHeight)
-
-    // Move to next position
-    if ((serviceIndex + 1) % GROUPS_PER_ROW === 0) {
-      currentX = 0
-      currentY += maxRowHeight + GROUP_GAP
-      maxRowHeight = 0
-    } else {
-      currentX += groupWidth + GROUP_GAP
     }
   })
 
-  return { nodes: layoutedNodes, edges }
+  // Find central service (most connections) - usually 'relations'
+  let centralService = 'relations'
+  let maxConnections = 0
+  services.forEach(service => {
+    const connections = serviceConnections[service].size
+    if (connections > maxConnections || (service === 'relations' && connections >= maxConnections)) {
+      maxConnections = connections
+      centralService = service
+    }
+  })
+
+  // Layout each service group internally
+  const groupLayouts: Record<string, { nodes: Array<{ id: string; x: number; y: number; width: number; height: number }>; width: number; height: number }> = {}
+
+  for (const service of services) {
+    groupLayouts[service] = await layoutServiceGroup(serviceGroups[service], layoutType)
+  }
+
+  // Position service groups using force-directed algorithm
+  const otherServices = services.filter(s => s !== centralService)
+
+  // Count edge connections between each service pair
+  const edgeCountBetween: Record<string, Record<string, number>> = {}
+  services.forEach(s => edgeCountBetween[s] = {})
+
+  edges.forEach(edge => {
+    const sourceNode = entityNodes.find(n => n.id === edge.source)
+    const targetNode = entityNodes.find(n => n.id === edge.target)
+    if (sourceNode && targetNode) {
+      const s1 = sourceNode.data.service as string
+      const s2 = targetNode.data.service as string
+      if (s1 !== s2) {
+        edgeCountBetween[s1][s2] = (edgeCountBetween[s1][s2] || 0) + 1
+        edgeCountBetween[s2][s1] = (edgeCountBetween[s2][s1] || 0) + 1
+      }
+    }
+  })
+
+  // Initialize positions: center for central, random around for others
+  const centerX = 1500
+  const centerY = 1000
+
+  const positions: Record<string, { x: number; y: number }> = {
+    [centralService]: { x: centerX, y: centerY }
+  }
+
+  // Initial placement: spread services based on connection strength to center
+  otherServices.forEach((service, index) => {
+    const connectionsToCenter = edgeCountBetween[service][centralService] || 0
+    // More connections = closer (smaller initial distance)
+    const baseDistance = 400 + Math.max(0, 10 - connectionsToCenter) * 50
+    const angle = (2 * Math.PI * index) / otherServices.length - Math.PI / 2
+    positions[service] = {
+      x: centerX + Math.cos(angle) * baseDistance,
+      y: centerY + Math.sin(angle) * baseDistance,
+    }
+  })
+
+  // Calculate diagonal size for each group (for collision detection)
+  const groupDiagonals: Record<string, number> = {}
+  services.forEach(s => {
+    const layout = groupLayouts[s]
+    groupDiagonals[s] = Math.sqrt(layout.width ** 2 + layout.height ** 2) / 2
+  })
+
+  // Force-directed iterations
+  const iterations = 150
+  const gap = 80 // Minimum gap between groups
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const forces: Record<string, { fx: number; fy: number }> = {}
+    services.forEach(s => forces[s] = { fx: 0, fy: 0 })
+
+    // Repulsion between all pairs - ALWAYS apply, stronger when overlapping
+    for (let i = 0; i < services.length; i++) {
+      for (let j = i + 1; j < services.length; j++) {
+        const s1 = services[i]
+        const s2 = services[j]
+        const dx = positions[s2].x - positions[s1].x
+        const dy = positions[s2].y - positions[s1].y
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1
+
+        // Minimum distance = sum of diagonals + gap
+        const minDist = groupDiagonals[s1] + groupDiagonals[s2] + gap
+
+        // Always repel, but stronger when overlapping
+        let force: number
+        if (dist < minDist) {
+          // Overlapping - strong repulsion
+          force = (minDist - dist) * 5
+        } else {
+          // Not overlapping - gentle repulsion to spread out
+          force = 1000 / (dist * dist)
+        }
+
+        const fx = (dx / dist) * force
+        const fy = (dy / dist) * force
+        forces[s1].fx -= fx
+        forces[s1].fy -= fy
+        forces[s2].fx += fx
+        forces[s2].fy += fy
+      }
+    }
+
+    // Attraction based on connections (pull connected services together)
+    services.forEach(s1 => {
+      services.forEach(s2 => {
+        if (s1 >= s2) return
+        const connections = edgeCountBetween[s1][s2] || 0
+        if (connections > 0) {
+          const dx = positions[s2].x - positions[s1].x
+          const dy = positions[s2].y - positions[s1].y
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1
+
+          // Ideal distance: groups should be close but not overlapping
+          const minDist = groupDiagonals[s1] + groupDiagonals[s2] + gap
+          const idealDist = minDist + 50 // Just outside minimum
+
+          if (dist > idealDist) {
+            // Pull together if too far
+            const force = (dist - idealDist) * 0.02 * Math.sqrt(connections)
+            const fx = (dx / dist) * force
+            const fy = (dy / dist) * force
+            forces[s1].fx += fx
+            forces[s1].fy += fy
+            forces[s2].fx -= fx
+            forces[s2].fy -= fy
+          }
+        }
+      })
+    })
+
+    // Pull towards center - stronger for services with fewer connections
+    otherServices.forEach(service => {
+      const dx = centerX - positions[service].x
+      const dy = centerY - positions[service].y
+
+      // Count total connections this service has
+      const totalConnections = Object.values(edgeCountBetween[service]).reduce((a, b) => a + b, 0)
+
+      // Stronger pull for services with no/few connections
+      const pullStrength = totalConnections === 0 ? 0.05 : (totalConnections < 3 ? 0.02 : 0.005)
+
+      forces[service].fx += dx * pullStrength
+      forces[service].fy += dy * pullStrength
+    })
+
+    // Apply forces (central service stays fixed)
+    const damping = Math.max(0.1, 1 - iter / iterations)
+    otherServices.forEach(service => {
+      positions[service].x += forces[service].fx * damping
+      positions[service].y += forces[service].fy * damping
+    })
+  }
+
+  // Convert center positions to top-left positions for groups
+  const groupPositions: Record<string, { x: number; y: number }> = {}
+  services.forEach(service => {
+    const layout = groupLayouts[service]
+    groupPositions[service] = {
+      x: positions[service].x - layout.width / 2,
+      y: positions[service].y - layout.height / 2,
+    }
+  })
+
+  // Build final nodes
+  const layoutedNodes: Node[] = []
+  const groupNodes: Node[] = []
+
+  services.forEach(service => {
+    const groupPos = groupPositions[service]
+    const layout = groupLayouts[service]
+    const color = serviceColorMap[service]
+
+    // Add entity nodes
+    layout.nodes.forEach(layoutNode => {
+      const originalNode = entityNodes.find(n => n.id === layoutNode.id)
+      if (originalNode) {
+        layoutedNodes.push({
+          ...originalNode,
+          position: {
+            x: groupPos.x + layoutNode.x + GROUP_PADDING,
+            y: groupPos.y + layoutNode.y + GROUP_PADDING + 30, // +30 for header
+          },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        })
+      }
+    })
+
+    // Add group node
+    groupNodes.push({
+      id: `group-${service}`,
+      type: 'serviceGroup',
+      position: { x: groupPos.x, y: groupPos.y },
+      data: {
+        label: service,
+        color,
+        width: layout.width,
+        height: layout.height,
+      },
+      draggable: true,
+      selectable: false,
+      zIndex: -1,
+    })
+  })
+
+  return { nodes: [...groupNodes, ...layoutedNodes], edges }
 }
 
 function SchemaGraphInner({ graph }: SchemaGraphProps) {
   const { fitView, zoomIn, zoomOut } = useReactFlow()
+  const [isLayouting, setIsLayouting] = useState(false)
+  const initialLayoutApplied = useRef(false)
 
   // Convert graph to nodes and edges
-  const { initialNodes, initialEdges, services } = useMemo(() => {
+  const { rawNodes, rawEdges, services, serviceColorMap } = useMemo(() => {
     const entities = Object.entries(graph.entities || {})
     const nodes: Node[] = []
     const edges: Edge[] = []
@@ -313,33 +571,47 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
       serviceSet.add(entity.service || 'unknown')
     })
     const serviceList = Array.from(serviceSet).sort()
-    const serviceColorMap: Record<string, (typeof SERVICE_COLOR_PALETTE)[0]> = {}
+    const colorMap: Record<string, (typeof SERVICE_COLOR_PALETTE)[0]> = {}
     serviceList.forEach((service, index) => {
-      serviceColorMap[service] = SERVICE_COLOR_PALETTE[index % SERVICE_COLOR_PALETTE.length]
+      colorMap[service] = SERVICE_COLOR_PALETTE[index % SERVICE_COLOR_PALETTE.length]
     })
 
-    // Create service group nodes first (they render behind entity nodes)
-    serviceList.forEach((service) => {
-      nodes.push({
-        id: `group-${service}`,
-        type: 'serviceGroup',
-        position: { x: 0, y: 0 },
-        data: {
-          label: service,
-          color: serviceColorMap[service],
-          width: 200,
-          height: 200,
-        },
-        draggable: false,
-        selectable: false,
-        zIndex: -1,
+    // Collect polymorphic relations (through Relationship entity)
+    // Relations without direct FK (ref) likely go through Relationship junction table
+    const polymorphicRelations: Array<{ parent: string; target: string; relationName: string }> = []
+    const hasRelationshipEntity = !!graph.entities['Relationship']
+
+    if (hasRelationshipEntity) {
+      entities.forEach(([entityName, entity]) => {
+        // Skip Relationship entity itself
+        if (entityName === 'Relationship') return
+
+        const relations = entity.relations || {}
+        Object.entries(relations).forEach(([relName, relation]) => {
+          const rel = relation as Relation
+          // Relations WITHOUT ref (no direct FK) go through Relationship
+          // These are the attached relations from RelationsViewSet
+          if (!rel.ref && graph.entities[rel.target]) {
+            polymorphicRelations.push({
+              parent: entityName,
+              target: rel.target,
+              relationName: relName,
+            })
+          }
+        })
       })
-    })
+    }
+
+    console.log('Polymorphic relations found:', polymorphicRelations.length, polymorphicRelations)
+
+    // Get unique entities connected to Relationship
+    const subjectEntities = new Set(polymorphicRelations.map(r => r.parent))
+    const objectEntities = new Set(polymorphicRelations.map(r => r.target))
 
     // Create entity nodes
     entities.forEach(([name, entity]) => {
       const service = entity.service || 'unknown'
-      const color = serviceColorMap[service]
+      const color = colorMap[service]
 
       // Analyze fields for FK
       const fieldsWithFk: Array<{ name: string; type: string; isFk?: boolean; fkTarget?: string }> = []
@@ -348,6 +620,7 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
       Object.entries(entityFields).forEach(([fieldName, field]) => {
         let isFk = false
         let fkTarget = ''
+        let isPolymorphicFk = false
 
         // Check if field has FK info from backend
         if (field.fk) {
@@ -365,12 +638,27 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
           })
         }
 
+        // Special case: Relationship entity's subject_id and object_id are polymorphic FKs
+        if (name === 'Relationship') {
+          if (fieldName === 'subject_id' && subjectEntities.size > 0) {
+            isPolymorphicFk = true
+            isFk = true
+            fkTarget = `[${Array.from(subjectEntities).join(', ')}]`
+          }
+          if (fieldName === 'object_id' && objectEntities.size > 0) {
+            isPolymorphicFk = true
+            isFk = true
+            fkTarget = `[${Array.from(objectEntities).join(', ')}]`
+          }
+        }
+
         fieldsWithFk.push({
           name: fieldName,
           type: field.type,
           isFk,
           fkTarget,
-        })
+          isPolymorphicFk,
+        } as { name: string; type: string; isFk?: boolean; fkTarget?: string; isPolymorphicFk?: boolean })
       })
 
       // Sort: id first, then FKs, then rest
@@ -401,6 +689,69 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         const rel = relation as Relation
         if (!graph.entities[rel.target]) return
 
+        // Relations WITHOUT ref (no direct FK) go through Relationship junction
+        // This matches the simplified AttachRelation approach
+        const isThroughRelation = !rel.ref && hasRelationshipEntity && name !== 'Relationship'
+
+        // For "through" relations, create edges VIA Relationship entity
+        if (isThroughRelation) {
+          console.log(`Creating through-relation edges: ${name} → Relationship → ${rel.target}`)
+
+          // Edge 1: Parent → Relationship (via subject_id)
+          const inEdgeId = `${name}-to-Relationship`
+          if (!edgeSet.has(inEdgeId)) {
+            edges.push({
+              id: `${name}-subject-Relationship`,
+              source: name,
+              sourceHandle: 'field-id',
+              target: 'Relationship',
+              targetHandle: 'field-subject_id',
+              type: 'smoothstep',
+              animated: false,
+              style: {
+                stroke: '#f472b6', // Pink for polymorphic incoming
+                strokeWidth: 2,
+              },
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                color: '#f472b6',
+                width: 12,
+                height: 12,
+              },
+              zIndex: 0,
+            })
+            edgeSet.add(inEdgeId)
+          }
+
+          // Edge 2: Relationship → Target (via object_id)
+          const outEdgeId = `Relationship-to-${rel.target}`
+          if (!edgeSet.has(outEdgeId)) {
+            edges.push({
+              id: `Relationship-object-${rel.target}`,
+              source: 'Relationship',
+              sourceHandle: 'field-object_id',
+              target: rel.target,
+              targetHandle: 'field-id-target',
+              type: 'smoothstep',
+              animated: false,
+              style: {
+                stroke: '#a78bfa', // Violet for polymorphic outgoing
+                strokeWidth: 2,
+              },
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                color: '#a78bfa',
+                width: 12,
+                height: 12,
+              },
+              zIndex: 0,
+            })
+            edgeSet.add(outEdgeId)
+          }
+
+          return // Don't create direct edge for through relations
+        }
+
         const edgeId = `${name}-${rel.target}`
         const reverseEdgeId = `${rel.target}-${name}`
 
@@ -408,7 +759,6 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
 
         const isCrossService = graph.entities[rel.target].service !== service
         const isFkRelation = !!rel.ref
-        const isThroughRelation = !!rel.through
 
         let strokeColor = '#22c55e'
         let strokeWidth = 2
@@ -422,8 +772,6 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         } else if (isFkRelation) {
           strokeColor = '#8b5cf6'
           animated = false
-        } else if (isThroughRelation) {
-          strokeColor = '#06b6d4'
         }
 
         if (rel.cardinality === 'one') {
@@ -493,7 +841,7 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
           source: name,
           sourceHandle: `field-${field.name}`,
           target: field.fkTarget,
-          targetHandle: 'field-id',
+          targetHandle: 'field-id-target',
           type: 'smoothstep',
           animated: false,
           style: {
@@ -526,38 +874,49 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
       })
     })
 
-    // Apply layout
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-      nodes,
-      edges,
-      'LR'
-    )
-
     return {
-      initialNodes: layoutedNodes,
-      initialEdges: layoutedEdges,
+      rawNodes: nodes,
+      rawEdges: edges,
       services: serviceList,
+      serviceColorMap: colorMap,
     }
   }, [graph])
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+  const [nodes, setNodes, onNodesChange] = useNodesState(rawNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(rawEdges)
 
-  const onLayout = useCallback(
-    (direction: 'TB' | 'LR') => {
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        nodes,
-        edges,
-        direction
-      )
-      setNodes([...layoutedNodes])
-      setEdges([...layoutedEdges])
+  // Apply initial layout
+  useEffect(() => {
+    if (!initialLayoutApplied.current && rawNodes.length > 0) {
+      initialLayoutApplied.current = true
+      applyLayout()
+    }
+  }, [rawNodes])
 
-      window.requestAnimationFrame(() => {
-        fitView({ padding: 0.1 })
-      })
+  const applyLayout = useCallback(
+    async () => {
+      setIsLayouting(true)
+
+      try {
+        const { nodes: layoutedNodes } = await applyElkLayout(
+          rawNodes,
+          rawEdges,
+          'elk-layered',
+          serviceColorMap
+        )
+        setNodes([...layoutedNodes])
+        setEdges([...rawEdges])
+
+        window.requestAnimationFrame(() => {
+          fitView({ padding: 0.1, duration: 300 })
+        })
+      } catch (error) {
+        console.error('Layout error:', error)
+      } finally {
+        setIsLayouting(false)
+      }
     },
-    [nodes, edges, setNodes, setEdges, fitView]
+    [rawNodes, rawEdges, serviceColorMap, setNodes, setEdges, fitView]
   )
 
   const entityCount = nodes.filter(n => n.type === 'entity').length
@@ -591,23 +950,12 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         />
       </ReactFlow>
 
-      {/* Layout Controls */}
-      <div className="absolute top-4 left-4 bg-gray-800/90 rounded-lg px-2 py-1.5 flex gap-1">
-        <button
-          onClick={() => onLayout('LR')}
-          className="px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 rounded"
-          title="Horizontal layout"
-        >
-          ↔ Horizontal
-        </button>
-        <button
-          onClick={() => onLayout('TB')}
-          className="px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 rounded"
-          title="Vertical layout"
-        >
-          ↕ Vertical
-        </button>
-      </div>
+      {/* Layout indicator */}
+      {isLayouting && (
+        <div className="absolute top-4 left-4 bg-gray-800/90 rounded-lg px-3 py-1.5">
+          <span className="text-xs text-gray-400 animate-pulse">Computing layout...</span>
+        </div>
+      )}
 
       {/* Legend + Zoom Controls */}
       <div className="absolute bottom-4 left-4 flex flex-col gap-2">
@@ -636,6 +984,20 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
               <div className="flex items-center gap-2">
                 <span className="text-amber-400">🔑</span>
                 <span className="text-gray-400">foreign key</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-0.5 bg-pink-400"></div>
+                <span className="text-gray-400">→ subject_id</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-0.5 bg-violet-400"></div>
+                <span className="text-gray-400">object_id →</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-pink-400">🔗</span>
+                <span className="text-gray-400">polymorphic FK</span>
               </div>
             </div>
           </div>

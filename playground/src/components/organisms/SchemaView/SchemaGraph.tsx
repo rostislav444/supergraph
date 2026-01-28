@@ -264,6 +264,7 @@ function ServiceGroupNode({
 }
 
 // Custom edge component with offset support for parallel edges
+// Creates orthogonal paths with offset in the middle segment
 function OffsetEdge({
   id,
   sourceX,
@@ -282,69 +283,113 @@ function OffsetEdge({
   data,
 }: EdgeProps) {
   const offset = (data?.offset as number) || 0
-  const EDGE_SPACING = 10 // pixels between parallel edges
-
-  // Calculate the perpendicular offset based on edge direction
-  const dx = targetX - sourceX
-  const dy = targetY - sourceY
-
-  // Apply offset - for smooth step edges, offset at connection points
+  const EDGE_SPACING = 15 // pixels between parallel edges
   const offsetAmount = offset * EDGE_SPACING
+  const radius = 6 // corner radius
 
-  // For horizontal-ish edges, offset vertically at connection points
-  // For vertical-ish edges, offset horizontally at connection points
-  const isHorizontal = Math.abs(dx) > Math.abs(dy)
+  // For zero offset, use standard smoothstep
+  if (offset === 0) {
+    const [path, labelX, labelY] = getSmoothStepPath({
+      sourceX, sourceY, sourcePosition,
+      targetX, targetY, targetPosition,
+      borderRadius: radius,
+    })
 
-  let offsetSourceX = sourceX
-  let offsetSourceY = sourceY
-  let offsetTargetX = targetX
-  let offsetTargetY = targetY
-
-  if (isHorizontal) {
-    // Offset vertically for horizontal edges
-    offsetSourceY = sourceY + offsetAmount
-    offsetTargetY = targetY + offsetAmount
-  } else {
-    // Offset horizontally for vertical edges
-    offsetSourceX = sourceX + offsetAmount
-    offsetTargetX = targetX + offsetAmount
+    return (
+      <>
+        <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+        {label && (
+          <g transform={`translate(${labelX}, ${labelY})`}>
+            <rect
+              x={-((labelBgPadding as [number, number])?.[0] || 4)}
+              y={-8}
+              width={String(label).length * 6 + ((labelBgPadding as [number, number])?.[0] || 4) * 2}
+              height={16}
+              rx={labelBgBorderRadius || 4}
+              style={labelBgStyle as React.CSSProperties}
+            />
+            <text style={labelStyle as React.CSSProperties} textAnchor="middle" dominantBaseline="middle">
+              {String(label)}
+            </text>
+          </g>
+        )}
+      </>
+    )
   }
 
-  // Get the path with offset positions
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX: offsetSourceX,
-    sourceY: offsetSourceY,
-    sourcePosition,
-    targetX: offsetTargetX,
-    targetY: offsetTargetY,
-    targetPosition,
-    borderRadius: 8,
-  })
+  // Determine primary direction based on source/target positions
+  const isSourceRight = sourcePosition === Position.Right
+  const isSourceLeft = sourcePosition === Position.Left
+  const isTargetRight = targetPosition === Position.Right
+  const isTargetLeft = targetPosition === Position.Left
+
+  // Calculate midpoint for the offset segment
+  const midX = (sourceX + targetX) / 2
+  const midY = (sourceY + targetY) / 2
+
+  let edgePath: string
+  let labelX: number
+  let labelY: number
+
+  // Build path based on handle positions
+  if ((isSourceRight || isSourceLeft) && (isTargetRight || isTargetLeft)) {
+    // Horizontal flow: source exits horizontally, target enters horizontally
+    // Path: source → horizontal → vertical (with offset) → horizontal → target
+    const exitDir = isSourceRight ? 1 : -1
+    const enterDir = isTargetLeft ? -1 : 1
+
+    // First horizontal segment length
+    const segLen = Math.min(30, Math.abs(targetX - sourceX) / 4)
+
+    // Waypoints
+    const x1 = sourceX + exitDir * segLen
+    const x2 = targetX + enterDir * segLen
+    const yMid = midY + offsetAmount
+
+    edgePath = `
+      M ${sourceX} ${sourceY}
+      L ${x1} ${sourceY}
+      Q ${x1 + exitDir * radius} ${sourceY} ${x1 + exitDir * radius} ${sourceY + Math.sign(yMid - sourceY) * radius}
+      L ${x1 + exitDir * radius} ${yMid - Math.sign(yMid - sourceY) * radius}
+      Q ${x1 + exitDir * radius} ${yMid} ${x1 + exitDir * radius + Math.sign(x2 - x1) * radius} ${yMid}
+      L ${x2 + enterDir * radius - Math.sign(x2 - x1) * radius} ${yMid}
+      Q ${x2 + enterDir * radius} ${yMid} ${x2 + enterDir * radius} ${yMid + Math.sign(targetY - yMid) * radius}
+      L ${x2 + enterDir * radius} ${targetY - Math.sign(targetY - yMid) * radius}
+      Q ${x2 + enterDir * radius} ${targetY} ${x2} ${targetY}
+      L ${targetX} ${targetY}
+    `.replace(/\s+/g, ' ').trim()
+
+    labelX = midX
+    labelY = yMid
+  } else {
+    // Vertical or mixed flow - use simpler bezier curve with offset
+    const controlOffset = offsetAmount
+
+    edgePath = `
+      M ${sourceX} ${sourceY}
+      C ${sourceX + controlOffset} ${sourceY + (targetY - sourceY) * 0.3}
+        ${targetX + controlOffset} ${targetY - (targetY - sourceY) * 0.3}
+        ${targetX} ${targetY}
+    `.replace(/\s+/g, ' ').trim()
+
+    labelX = midX + controlOffset * 0.5
+    labelY = midY
+  }
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        style={style}
-        markerEnd={markerEnd}
-      />
+      <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
       {label && (
         <g transform={`translate(${labelX}, ${labelY})`}>
           <rect
-            x={-(labelBgPadding as [number, number])?.[0] || -4}
+            x={-((labelBgPadding as [number, number])?.[0] || 4)}
             y={-8}
             width={String(label).length * 6 + ((labelBgPadding as [number, number])?.[0] || 4) * 2}
             height={16}
             rx={labelBgBorderRadius || 4}
             style={labelBgStyle as React.CSSProperties}
           />
-          <text
-            style={labelStyle as React.CSSProperties}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            className="react-flow__edge-text"
-          >
+          <text style={labelStyle as React.CSSProperties} textAnchor="middle" dominantBaseline="middle">
             {String(label)}
           </text>
         </g>

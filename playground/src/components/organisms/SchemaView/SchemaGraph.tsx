@@ -79,7 +79,7 @@ function EntityNode({
 }) {
   return (
     <div
-      className="rounded-lg shadow-xl relative"
+      className="rounded-lg shadow-xl relative cursor-pointer hover:shadow-2xl transition-shadow"
       style={{
         backgroundColor: '#1f2937',
         border: `2px solid ${data.color.border}`,
@@ -130,7 +130,7 @@ function EntityNode({
                   position={Position.Right}
                   id="field-id"
                   style={{
-                    background: '#f472b6', // Pink - matches subject_id color
+                    background: '#fbbf24', // Yellow - matches input to Relationship
                     width: 6,
                     height: 6,
                     right: -14,
@@ -146,7 +146,7 @@ function EntityNode({
                   position={Position.Left}
                   id="field-subject_id"
                   style={{
-                    background: '#f472b6', // Pink
+                    background: '#fbbf24', // Yellow - input to Relationship
                     width: 6,
                     height: 6,
                     left: -14,
@@ -162,7 +162,7 @@ function EntityNode({
                   position={Position.Right}
                   id="field-object_id"
                   style={{
-                    background: '#a78bfa', // Violet
+                    background: '#f97316', // Orange - output from Relationship
                     width: 6,
                     height: 6,
                     right: -14,
@@ -191,18 +191,18 @@ function EntityNode({
               {field.isFk && (
                 <span
                   className="text-[8px]"
-                  style={{ color: field.isPolymorphicFk ? '#f472b6' : '#fbbf24' }}
+                  style={{ color: field.isPolymorphicFk ? '#fbbf24' : '#fbbf24' }}
                   title={`FK → ${field.fkTarget}`}
                 >
                   {field.isPolymorphicFk ? '🔗' : '🔑'}
                 </span>
               )}
-              <span style={{ color: field.isFk ? (field.isPolymorphicFk ? '#f472b6' : '#fbbf24') : '#9ca3af' }}>
+              <span style={{ color: field.isFk ? '#fbbf24' : '#9ca3af' }}>
                 {field.name}
               </span>
               <span
                 className="text-[9px] ml-auto font-semibold"
-                style={{ color: field.isFk ? (field.isPolymorphicFk ? '#a78bfa' : '#fbbf24') : getTypeColor(field.type) }}
+                style={{ color: field.isFk ? (field.isPolymorphicFk ? '#f97316' : '#fbbf24') : getTypeColor(field.type) }}
               >
                 {field.type}
               </span>
@@ -276,8 +276,20 @@ interface ElkEdge {
 // Layout each service group internally using ELK
 async function layoutServiceGroup(
   serviceNodes: Node[],
+  internalEdges: Edge[], // Edges between entities within this group
   layoutType: LayoutType
 ): Promise<{ nodes: Array<{ id: string; x: number; y: number; width: number; height: number }>; width: number; height: number }> {
+  const nodeIds = new Set(serviceNodes.map(n => n.id))
+
+  // Filter edges to only include those within this group
+  const groupEdges: ElkEdge[] = internalEdges
+    .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+    .map(e => ({
+      id: e.id,
+      sources: [e.source],
+      targets: [e.target],
+    }))
+
   const elkGraph = {
     id: 'group',
     layoutOptions: elkLayoutOptions[layoutType],
@@ -286,7 +298,7 @@ async function layoutServiceGroup(
       width: NODE_WIDTH,
       height: calculateNodeHeight((node.data.fields as Array<unknown>).length),
     })),
-    edges: [] as ElkEdge[],
+    edges: groupEdges,
   }
 
   const layouted = await elk.layout(elkGraph)
@@ -358,7 +370,7 @@ async function applyElkLayout(
   const groupLayouts: Record<string, { nodes: Array<{ id: string; x: number; y: number; width: number; height: number }>; width: number; height: number }> = {}
 
   for (const service of services) {
-    groupLayouts[service] = await layoutServiceGroup(serviceGroups[service], layoutType)
+    groupLayouts[service] = await layoutServiceGroup(serviceGroups[service], edges, layoutType)
   }
 
   // Position service groups using force-directed algorithm
@@ -508,34 +520,18 @@ async function applyElkLayout(
     }
   })
 
-  // Build final nodes
-  const layoutedNodes: Node[] = []
-  const groupNodes: Node[] = []
+  // Build final nodes - groups first, then entities as children
+  const allNodes: Node[] = []
 
   services.forEach(service => {
     const groupPos = groupPositions[service]
     const layout = groupLayouts[service]
     const color = serviceColorMap[service]
+    const groupId = `group-${service}`
 
-    // Add entity nodes
-    layout.nodes.forEach(layoutNode => {
-      const originalNode = entityNodes.find(n => n.id === layoutNode.id)
-      if (originalNode) {
-        layoutedNodes.push({
-          ...originalNode,
-          position: {
-            x: groupPos.x + layoutNode.x + GROUP_PADDING,
-            y: groupPos.y + layoutNode.y + GROUP_PADDING + 30, // +30 for header
-          },
-          sourcePosition: Position.Right,
-          targetPosition: Position.Left,
-        })
-      }
-    })
-
-    // Add group node
-    groupNodes.push({
-      id: `group-${service}`,
+    // Add group node FIRST (parent must exist before children)
+    allNodes.push({
+      id: groupId,
       type: 'serviceGroup',
       position: { x: groupPos.x, y: groupPos.y },
       data: {
@@ -545,17 +541,38 @@ async function applyElkLayout(
         height: layout.height,
       },
       draggable: true,
-      selectable: false,
+      selectable: true,
       zIndex: -1,
+    })
+
+    // Add entity nodes as children of the group (relative positions)
+    layout.nodes.forEach(layoutNode => {
+      const originalNode = entityNodes.find(n => n.id === layoutNode.id)
+      if (originalNode) {
+        allNodes.push({
+          ...originalNode,
+          position: {
+            // Position relative to parent group
+            x: layoutNode.x + GROUP_PADDING,
+            y: layoutNode.y + GROUP_PADDING + 30, // +30 for header
+          },
+          parentId: groupId, // Makes it move with the group
+          extent: 'parent' as const, // Keep within parent bounds
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        })
+      }
     })
   })
 
-  return { nodes: [...groupNodes, ...layoutedNodes], edges }
+  return { nodes: allNodes, edges }
 }
 
 function SchemaGraphInner({ graph }: SchemaGraphProps) {
   const { fitView, zoomIn, zoomOut } = useReactFlow()
   const [isLayouting, setIsLayouting] = useState(false)
+  const [isDragEnabled, setIsDragEnabled] = useState(false)
+  const [selectedEntity, setSelectedEntity] = useState<string | null>(null)
   const initialLayoutApplied = useRef(false)
 
   // Convert graph to nodes and edges
@@ -707,14 +724,15 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
               target: 'Relationship',
               targetHandle: 'field-subject_id',
               type: 'smoothstep',
-              animated: false,
+              animated: true,
               style: {
-                stroke: '#f472b6', // Pink for polymorphic incoming
+                stroke: '#fbbf24', // Yellow dashed for input to Relationship
                 strokeWidth: 2,
+                strokeDasharray: '6,4',
               },
               markerEnd: {
                 type: MarkerType.ArrowClosed,
-                color: '#f472b6',
+                color: '#fbbf24',
                 width: 12,
                 height: 12,
               },
@@ -733,14 +751,14 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
               target: rel.target,
               targetHandle: 'field-id-target',
               type: 'smoothstep',
-              animated: false,
+              animated: true,
               style: {
-                stroke: '#a78bfa', // Violet for polymorphic outgoing
+                stroke: '#f97316', // Orange for output from Relationship
                 strokeWidth: 2,
               },
               markerEnd: {
                 type: MarkerType.ArrowClosed,
-                color: '#a78bfa',
+                color: '#f97316',
                 width: 12,
                 height: 12,
               },
@@ -766,15 +784,14 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         let strokeDasharray: string | undefined
 
         if (isCrossService) {
-          strokeColor = '#f59e0b'
+          strokeColor = '#fbbf24' // Yellow for cross-service
           strokeWidth = 2
-          strokeDasharray = '8,4'
+          strokeDasharray = '6,4'
+          animated = true // Always animated for cross-service
         } else if (isFkRelation) {
           strokeColor = '#8b5cf6'
           animated = false
-        }
-
-        if (rel.cardinality === 'one') {
+        } else if (rel.cardinality === 'one') {
           animated = false
         }
 
@@ -830,10 +847,12 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         const isCrossService = targetEntity.service !== service
         let strokeColor = '#8b5cf6' // Purple for FK
         let strokeDasharray: string | undefined
+        let animated = false
 
         if (isCrossService) {
-          strokeColor = '#f59e0b' // Orange for cross-service
-          strokeDasharray = '8,4'
+          strokeColor = '#fbbf24' // Yellow for cross-service
+          strokeDasharray = '6,4'
+          animated = true // Animated for cross-service
         }
 
         edges.push({
@@ -843,7 +862,7 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
           target: field.fkTarget,
           targetHandle: 'field-id-target',
           type: 'smoothstep',
-          animated: false,
+          animated,
           style: {
             stroke: strokeColor,
             strokeWidth: 2,
@@ -893,6 +912,106 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
     }
   }, [rawNodes])
 
+  // Compute connected entities when an entity is selected
+  // Includes transitive connections through Relationship entity
+  const { connectedEntities, relevantEdgeIds } = useMemo(() => {
+    if (!selectedEntity) {
+      return { connectedEntities: new Set<string>(), relevantEdgeIds: new Set<string>() }
+    }
+
+    const connected = new Set<string>()
+    const relevantEdges = new Set<string>()
+
+    // Start with the selected entity
+    connected.add(selectedEntity)
+
+    // Find all edges connected to the selected entity (direct connections)
+    rawEdges.forEach(edge => {
+      if (edge.source === selectedEntity) {
+        relevantEdges.add(edge.id)
+        connected.add(edge.target)
+      }
+      if (edge.target === selectedEntity) {
+        relevantEdges.add(edge.id)
+        connected.add(edge.source)
+      }
+    })
+
+    // Traverse through Relationship entity for transitive connections
+    // If selected entity connects to Relationship, find what Relationship connects to
+    if (connected.has('Relationship') && selectedEntity !== 'Relationship') {
+      rawEdges.forEach(edge => {
+        // Edges FROM Relationship to other entities
+        if (edge.source === 'Relationship' && !connected.has(edge.target)) {
+          relevantEdges.add(edge.id)
+          connected.add(edge.target)
+        }
+        // Edges TO Relationship from other entities
+        if (edge.target === 'Relationship' && !connected.has(edge.source)) {
+          relevantEdges.add(edge.id)
+          connected.add(edge.source)
+        }
+      })
+    }
+
+    return { connectedEntities: connected, relevantEdgeIds: relevantEdges }
+  }, [selectedEntity, rawEdges])
+
+  // Filter nodes and edges when entity is selected
+  const filteredNodes = useMemo(() => {
+    if (!selectedEntity) return rawNodes
+    return rawNodes.filter(n => connectedEntities.has(n.id))
+  }, [rawNodes, selectedEntity, connectedEntities])
+
+  const filteredEdges = useMemo(() => {
+    if (!selectedEntity) return rawEdges
+    return rawEdges.filter(e => relevantEdgeIds.has(e.id))
+  }, [rawEdges, selectedEntity, relevantEdgeIds])
+
+  // Handle node click for entity selection
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type === 'entity') {
+      const entityName = node.id
+      setSelectedEntity(prev => prev === entityName ? null : entityName)
+    }
+  }, [])
+
+  // Apply layout when selection changes
+  const applyFilteredLayout = useCallback(
+    async (nodesToLayout: Node[], edgesToLayout: Edge[]) => {
+      if (nodesToLayout.length === 0) return
+
+      setIsLayouting(true)
+
+      try {
+        const { nodes: layoutedNodes } = await applyElkLayout(
+          nodesToLayout,
+          edgesToLayout,
+          'elk-layered',
+          serviceColorMap
+        )
+        setNodes([...layoutedNodes])
+        setEdges([...edgesToLayout])
+
+        window.requestAnimationFrame(() => {
+          fitView({ padding: 0.2, duration: 300 })
+        })
+      } catch (error) {
+        console.error('Layout error:', error)
+      } finally {
+        setIsLayouting(false)
+      }
+    },
+    [serviceColorMap, setNodes, setEdges, fitView]
+  )
+
+  // Re-layout when selection changes
+  useEffect(() => {
+    if (selectedEntity !== null || initialLayoutApplied.current) {
+      applyFilteredLayout(filteredNodes, filteredEdges)
+    }
+  }, [selectedEntity, filteredNodes, filteredEdges, applyFilteredLayout])
+
   const applyLayout = useCallback(
     async () => {
       setIsLayouting(true)
@@ -928,7 +1047,9 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
+        nodesDraggable={isDragEnabled}
         fitView
         fitViewOptions={{ padding: 0.1 }}
         minZoom={0.05}
@@ -957,6 +1078,29 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         </div>
       )}
 
+      {/* Selected entity indicator */}
+      {selectedEntity && (
+        <div
+          className="absolute top-4 left-4 rounded-lg px-3 py-1.5 flex items-center gap-2 bg-gray-800/90 border border-gray-600"
+        >
+          <span className="text-xs text-white font-medium">
+            🔍 {selectedEntity}
+          </span>
+          <span className="text-[10px] text-gray-400">
+            ({connectedEntities.size} connected)
+          </span>
+          <button
+            onClick={() => setSelectedEntity(null)}
+            className="text-gray-400 hover:text-white transition-colors ml-1"
+            title="Show all entities"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Legend + Zoom Controls */}
       <div className="absolute bottom-4 left-4 flex flex-col gap-2">
         {/* Legend */}
@@ -978,7 +1122,10 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <div className="w-4 h-0.5" style={{ borderTop: '2px dashed #f59e0b' }}></div>
+                <div className="w-4 h-0.5 relative">
+                  <div className="absolute inset-0" style={{ borderTop: '2px dashed #fbbf24' }}></div>
+                  <div className="absolute inset-0 animate-pulse" style={{ borderTop: '2px dashed #fbbf24', opacity: 0.5 }}></div>
+                </div>
                 <span className="text-gray-400">cross-service</span>
               </div>
               <div className="flex items-center gap-2">
@@ -988,27 +1135,53 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <div className="w-4 h-0.5 bg-pink-400"></div>
-                <span className="text-gray-400">→ subject_id</span>
+                <div className="w-4 h-0.5" style={{ borderTop: '2px dashed #fbbf24' }}></div>
+                <span className="text-gray-400">→ Relation</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-0.5 bg-violet-400"></div>
-                <span className="text-gray-400">object_id →</span>
+                <div className="w-4 h-0.5 bg-orange-500"></div>
+                <span className="text-gray-400">Relation →</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-pink-400">🔗</span>
-                <span className="text-gray-400">polymorphic FK</span>
+                <span className="text-yellow-400">🔗</span>
+                <span className="text-gray-400">polymorphic</span>
               </div>
             </div>
           </div>
-          <div className="mt-2 pt-2 border-t border-gray-700 flex gap-3">
-            <span className="text-gray-500">{entityCount} entities</span>
-            <span className="text-gray-500">{services.length} services</span>
+          <div className="mt-2 pt-2 border-t border-gray-700 flex flex-col gap-1">
+            <div className="flex gap-3 items-center">
+              <span className="text-gray-500">{selectedEntity ? connectedEntities.size : entityCount} entities</span>
+              <span className="text-gray-500">{services.length} services</span>
+              {selectedEntity && (
+                <button
+                  onClick={() => setSelectedEntity(null)}
+                  className="ml-auto text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-0.5 rounded transition-colors"
+                >
+                  Show all
+                </button>
+              )}
+            </div>
+            <span className="text-gray-600 text-[10px]">Click entity to filter connections</span>
           </div>
         </div>
 
-        {/* Zoom Controls - horizontal, full width */}
+        {/* Controls - horizontal */}
         <div className="bg-gray-800/90 rounded-lg flex overflow-hidden">
+          {/* Drag mode toggle */}
+          <button
+            onClick={() => setIsDragEnabled(!isDragEnabled)}
+            className={`flex-1 py-2 px-3 transition-colors border-r border-gray-700 flex items-center justify-center gap-1.5 ${
+              isDragEnabled
+                ? 'bg-yellow-600 text-white'
+                : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+            }`}
+            title={isDragEnabled ? 'Disable drag mode' : 'Enable drag mode'}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" />
+            </svg>
+            <span className="text-xs">{isDragEnabled ? 'Drag' : 'Pan'}</span>
+          </button>
           <button
             onClick={() => zoomIn({ duration: 200 })}
             className="flex-1 py-2 text-green-400 hover:bg-green-600 hover:text-white transition-colors border-r border-gray-700 flex items-center justify-center"

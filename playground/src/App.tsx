@@ -40,7 +40,7 @@ import { extractEntityNames } from '@utils/queryParser'
 // Types
 import type { OperationMode } from '@/types'
 
-type SchemaViewMode = 'graph' | 'hcl' | 'json'
+type SchemaViewMode = 'graph' | 'hcl' | 'json' | 'typescript'
 
 function AppContent() {
   const dispatch = useAppDispatch()
@@ -64,7 +64,9 @@ function AppContent() {
     ? 'hcl'
     : location.pathname === '/schema/json'
       ? 'json'
-      : 'graph'
+      : location.pathname === '/schema/typescript'
+        ? 'typescript'
+        : 'graph'
 
   useEffect(() => {
     dispatch(fetchGraph())
@@ -210,6 +212,15 @@ function AppContent() {
               >
                 JSON
               </button>
+              <button
+                onClick={() => handleSchemaViewChange('typescript')}
+                className={clsx(
+                  'px-3 py-1 text-sm font-medium rounded-md transition-all',
+                  schemaViewMode === 'typescript' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                )}
+              >
+                TypeScript
+              </button>
             </div>
           )}
 
@@ -320,6 +331,7 @@ function AppContent() {
           <Route path="/schema" element={<SchemaView graph={graph} viewMode="graph" />} />
           <Route path="/schema/hcl" element={<SchemaView graph={graph} viewMode="hcl" />} />
           <Route path="/schema/json" element={<SchemaView graph={graph} viewMode="json" />} />
+          <Route path="/schema/typescript" element={<SchemaView graph={graph} viewMode="typescript" />} />
         </Routes>
       </main>
     </div>

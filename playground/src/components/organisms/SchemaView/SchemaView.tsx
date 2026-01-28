@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { HclHighlighter } from './HclHighlighter'
 import { SchemaGraph } from './SchemaGraph'
+import { TypeScriptGenerator } from './TypeScriptGenerator'
 import type { Graph } from '@/types'
 
-type ViewMode = 'graph' | 'hcl' | 'json'
+type ViewMode = 'graph' | 'hcl' | 'json' | 'typescript'
 
 export interface SchemaViewProps {
   graph: Graph | null
@@ -46,6 +47,11 @@ export function SchemaView({ graph, viewMode = 'graph' }: SchemaViewProps) {
     } else if (viewMode === 'hcl') {
       navigator.clipboard.writeText(hcl)
     }
+  }
+
+  // TypeScript view has its own toolbar
+  if (viewMode === 'typescript') {
+    return <TypeScriptGenerator graph={graph} />
   }
 
   return (

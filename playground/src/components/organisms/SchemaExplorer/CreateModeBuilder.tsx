@@ -1,6 +1,7 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useState } from 'react'
 import { DataFieldItem } from '@molecules/DataFieldItem'
 import { FieldItem } from '@molecules/FieldItem'
+import FkLookupModal from '@/components/FkLookupModal'
 import type { Entity, Graph, Field } from '@/types'
 import { getDefaultValue, isFieldRequired } from '@utils/fieldHelpers'
 
@@ -23,6 +24,9 @@ export function CreateModeBuilder({
     () => Object.entries(entity?.fields || {}) as Array<[string, Field]>,
     [entity]
   )
+
+  // State for FK lookup modal
+  const [lookupField, setLookupField] = useState<{ fieldName: string; targetEntity: string } | null>(null)
 
   // Separate fields into required and optional
   const { requiredFields, optionalFields } = useMemo(() => {
@@ -81,6 +85,35 @@ export function CreateModeBuilder({
       return newData
     },
     [requiredFields]
+  )
+
+  // Handle opening FK lookup modal
+  const handleOpenLookup = useCallback(
+    (fieldName: string, targetEntity: string) => {
+      setLookupField({ fieldName, targetEntity })
+    },
+    []
+  )
+
+  // Handle selecting from FK lookup modal
+  const handleLookupSelect = useCallback(
+    (id: number) => {
+      if (!lookupField) return
+      try {
+        const parsed = JSON.parse(queryText)
+        const createOp = parsed.create?.[entityName] || { data: {}, response: ['id'] }
+
+        createOp.data[lookupField.fieldName] = id
+        createOp.data = ensureRequiredFields(createOp.data)
+
+        const newQuery = { create: { [entityName]: createOp } }
+        onUpdateQuery(JSON.stringify(newQuery, null, 2))
+      } catch {
+        // Ignore parse errors
+      }
+      setLookupField(null)
+    },
+    [queryText, entityName, onUpdateQuery, ensureRequiredFields, lookupField]
   )
 
   // Toggle data field
@@ -270,6 +303,7 @@ export function CreateModeBuilder({
               disabled={isRequired}
               graph={graph}
               entityName={entityName}
+              onOpenLookup={(targetEntity) => handleOpenLookup(name, targetEntity)}
             />
           )
         })}
@@ -306,6 +340,17 @@ export function CreateModeBuilder({
           />
         ))}
       </div>
+
+      {/* FK Lookup Modal */}
+      {lookupField && (
+        <FkLookupModal
+          isOpen={!!lookupField}
+          onClose={() => setLookupField(null)}
+          onSelect={handleLookupSelect}
+          targetEntity={lookupField.targetEntity}
+          graph={graph}
+        />
+      )}
     </div>
   )
 }

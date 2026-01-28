@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import clsx from 'clsx'
 import { ChevronIcon } from '@atoms/icons/ChevronIcon'
 import { CheckIcon } from '@atoms/CheckIcon'
 import { TruncatedText } from '@atoms/TruncatedText'
+import FkLookupModal from '@/components/FkLookupModal'
 import type { Entity, Graph, TransactionStep, ColorConfig, Field } from '@/types'
 import { STEP_OPERATIONS } from '@constants/filters'
 import { OP_BADGE_COLORS } from '@constants/colors'
@@ -41,6 +42,7 @@ export function TransactionStepCard({
 }: TransactionStepCardProps) {
   const [expanded, setExpanded] = useState(true)
   const [showResponse, setShowResponse] = useState(false)
+  const [lookupField, setLookupField] = useState<{ fieldName: string; targetEntity: string } | null>(null)
 
   const info = useMemo((): StepInfo | null => {
     const operation = Object.keys(step).find((k) =>
@@ -180,6 +182,35 @@ export function TransactionStepCard({
     })
     updateStepData({ data: allData })
   }
+
+  // Get target entity for a FK field
+  const getTargetEntity = useCallback((fieldName: string) => {
+    if (!fieldName.endsWith('_id')) return null
+    // Try to find from relations
+    const relations = entityDef?.relations || {}
+    for (const [, rel] of Object.entries(relations)) {
+      if (rel.ref?.from_field === fieldName) {
+        return rel.target || rel.ref?.to_entity
+      }
+    }
+    // Fallback to infer from field name
+    return inferTargetEntity(fieldName, info?.entityName || '', allEntityNames)
+  }, [entityDef, info, allEntityNames])
+
+  // Handle opening FK lookup modal
+  const handleOpenLookup = useCallback((fieldName: string) => {
+    const targetEntity = getTargetEntity(fieldName)
+    if (targetEntity) {
+      setLookupField({ fieldName, targetEntity })
+    }
+  }, [getTargetEntity])
+
+  // Handle selecting from FK lookup modal
+  const handleLookupSelect = useCallback((id: number) => {
+    if (!lookupField) return
+    handleValueChange(lookupField.fieldName, id)
+    setLookupField(null)
+  }, [lookupField, handleValueChange])
 
   // Clear data fields (keep required)
   const handleClearData = () => {
@@ -349,36 +380,54 @@ export function TransactionStepCard({
                         <div className="min-w-0 flex items-center gap-0.5">
                           {selected ? (
                             isRefField ? (
-                              variables.length > 0 ? (
-                                <select
-                                  value={typeof value === 'string' && value.startsWith('$') ? value : ''}
-                                  onChange={(e) =>
-                                    handleValueChange(name, e.target.value || parseInt(value as string) || 0)
-                                  }
-                                  className={clsx(
-                                    'flex-1 bg-gray-700 text-[10px] h-5 px-1 rounded border text-purple-300 min-w-0',
-                                    isEmptyRequired ? 'border-red-500' : 'border-gray-600'
-                                  )}
-                                >
-                                  <option value="">Manual ID...</option>
-                                  {variables.map((v) => (
-                                    <option key={v} value={`${v}.id`}>
-                                      {v}.id
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <input
-                                  type="number"
-                                  value={typeof value === 'string' && value.startsWith('$') ? '' : ((value ?? '') as string | number)}
-                                  onChange={(e) => handleValueChange(name, parseInt(e.target.value) || 0)}
-                                  placeholder={isRequired ? 'Required...' : 'ID...'}
-                                  className={clsx(
-                                    'flex-1 bg-gray-700 text-[10px] h-5 px-1 rounded border text-white placeholder-gray-500 min-w-0',
-                                    isEmptyRequired ? 'border-red-500 placeholder-red-400' : 'border-gray-600'
-                                  )}
-                                />
-                              )
+                              <div className="flex items-center gap-0.5 min-w-0 w-full">
+                                {variables.length > 0 ? (
+                                  <select
+                                    value={typeof value === 'string' && value.startsWith('$') ? value : ''}
+                                    onChange={(e) =>
+                                      handleValueChange(name, e.target.value || parseInt(value as string) || 0)
+                                    }
+                                    className={clsx(
+                                      'flex-1 bg-gray-700 text-[10px] h-5 px-1 rounded border text-purple-300 min-w-0',
+                                      isEmptyRequired ? 'border-red-500' : 'border-gray-600'
+                                    )}
+                                  >
+                                    <option value="">Manual ID...</option>
+                                    {variables.map((v) => (
+                                      <option key={v} value={`${v}.id`}>
+                                        {v}.id
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    value={typeof value === 'string' && value.startsWith('$') ? '' : ((value ?? '') as string | number)}
+                                    onChange={(e) => handleValueChange(name, parseInt(e.target.value) || 0)}
+                                    placeholder={isRequired ? 'Required...' : 'ID...'}
+                                    className={clsx(
+                                      'flex-1 bg-gray-700 text-[10px] h-5 px-1 rounded border text-white placeholder-gray-500 min-w-0',
+                                      isEmptyRequired ? 'border-red-500 placeholder-red-400' : 'border-gray-600'
+                                    )}
+                                  />
+                                )}
+                                {getTargetEntity(name) && (
+                                  <button
+                                    onClick={() => handleOpenLookup(name)}
+                                    className="flex-shrink-0 w-5 h-5 flex items-center justify-center bg-gray-600 hover:bg-gray-500 rounded text-gray-300 hover:text-white"
+                                    title={`Search ${getTargetEntity(name)}`}
+                                  >
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                                      />
+                                    </svg>
+                                  </button>
+                                )}
+                              </div>
                             ) : isEnum ? (
                               <select
                                 value={(value as string) || ''}
@@ -499,6 +548,17 @@ export function TransactionStepCard({
             </div>
           )}
         </div>
+      )}
+
+      {/* FK Lookup Modal */}
+      {lookupField && (
+        <FkLookupModal
+          isOpen={!!lookupField}
+          onClose={() => setLookupField(null)}
+          onSelect={handleLookupSelect}
+          targetEntity={lookupField.targetEntity}
+          graph={graph}
+        />
       )}
     </div>
   )

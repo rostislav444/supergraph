@@ -82,6 +82,9 @@ function generateTypeScript(graph: Graph): string {
   lines.push('// Auto-generated TypeScript interfaces from Supergraph schema')
   lines.push('// Generated at: ' + new Date().toISOString())
   lines.push('')
+  lines.push('// Note: Relations are included as optional properties. When querying with relations,')
+  lines.push('// specify fields and nested relations in the query config to expand them.')
+  lines.push('')
 
   const entities = Object.entries(graph.entities || {}).sort((a, b) => a[0].localeCompare(b[0]))
 
@@ -101,14 +104,19 @@ function generateTypeScript(graph: Graph): string {
     lines.push('')
 
     serviceEntities.forEach(([entityName, entity]) => {
-      // Generate main interface
+      // Generate main interface with fields AND relations
       lines.push(`export interface ${entityName} {`)
 
-      // Fields
+      // Fields - sort with id first, then FK fields, then others
       const fields = Object.entries(entity.fields || {}).sort((a, b) => {
-        // id first, then alphabetically
+        // id first
         if (a[0] === 'id') return -1
         if (b[0] === 'id') return 1
+        // FK fields second (fields ending with Id or _id)
+        const aIsFk = a[1].fk !== undefined || a[0].endsWith('Id') || a[0].endsWith('_id')
+        const bIsFk = b[1].fk !== undefined || b[0].endsWith('Id') || b[0].endsWith('_id')
+        if (aIsFk && !bIsFk) return -1
+        if (!aIsFk && bIsFk) return 1
         return a[0].localeCompare(b[0])
       })
 
@@ -120,24 +128,37 @@ function generateTypeScript(graph: Graph): string {
         wrapLine(fieldLine, '  ').forEach(l => lines.push(l))
       })
 
+      // Relations - include directly in the interface
+      const relations = Object.entries(entity.relations || {}).sort((a, b) => a[0].localeCompare(b[0]))
+
+      if (relations.length > 0) {
+        lines.push('  // Relations')
+        relations.forEach(([relName, rel]) => {
+          const relation = rel as Relation
+          if (relation.cardinality === 'many') {
+            // Array relation
+            lines.push(`  ${relName}?: ${relation.target}[]`)
+            lines.push(`  ${relName}Count?: number`)
+          } else {
+            // Single relation
+            lines.push(`  ${relName}?: ${relation.target} | null`)
+          }
+        })
+      }
+
       lines.push('}')
 
-      // Generate interface with relations if entity has relations
-      const relations = Object.entries(entity.relations || {})
-      if (relations.length > 0) {
-        lines.push('')
-        lines.push(`export interface ${entityName}WithRelations extends ${entityName} {`)
-
-        relations.sort((a, b) => a[0].localeCompare(b[0])).forEach(([relName, rel]) => {
-          const relation = rel as Relation
-          const relType = relation.cardinality === 'many'
-            ? `${relation.target}[]`
-            : `${relation.target} | null`
-          lines.push(`  ${relName}?: ${relType}`)
-        })
-
-        lines.push('}')
-      }
+      // Generate Paginated type
+      lines.push('')
+      lines.push(`export interface Paginated${entityName} {`)
+      lines.push(`  items?: ${entityName}[]`)
+      lines.push(`  ids?: number[]`)
+      lines.push(`  pagination?: {`)
+      lines.push(`    totalCount: number`)
+      lines.push(`    limit: number`)
+      lines.push(`    offset: number`)
+      lines.push(`  }`)
+      lines.push('}')
 
       // Add spacing between entity blocks
       lines.push('')
@@ -157,17 +178,124 @@ function generateTypeScript(graph: Graph): string {
   wrapLine(entityNameLine, '').forEach(l => lines.push(l))
   lines.push('')
 
-  // Create input types (without id, with optional fields)
-  lines.push(`// Create input types (for POST requests)`)
+  // Entity map type
+  lines.push(`// Entity type map`)
+  lines.push(`export interface EntityTypeMap {`)
+  entities.forEach(([entityName]) => {
+    lines.push(`  ${entityName}: ${entityName}`)
+  })
+  lines.push(`}`)
+  lines.push('')
+
+  // Relations map (which entity has which relations)
+  lines.push(`// Relations map - shows available relations for each entity`)
+  lines.push(`export interface EntityRelationsMap {`)
   entities.forEach(([entityName, entity]) => {
-    lines.push(`export type ${entityName}CreateInput = Omit<${entityName}, 'id'>`)
+    const relations = Object.entries(entity.relations || {})
+    if (relations.length > 0) {
+      const relTypes = relations.map(([relName, rel]) => {
+        const relation = rel as Relation
+        return `${relName}: '${relation.target}'`
+      }).join('; ')
+      lines.push(`  ${entityName}: { ${relTypes} }`)
+    } else {
+      lines.push(`  ${entityName}: Record<string, never>`)
+    }
+  })
+  lines.push(`}`)
+  lines.push('')
+
+  // Fields map (field names per entity for autocomplete)
+  lines.push(`// Field names per entity (for autocomplete)`)
+  lines.push(`export interface EntityFieldsMap {`)
+  entities.forEach(([entityName, entity]) => {
+    const fieldNames = Object.keys(entity.fields || {}).map(f => `'${f}'`).join(' | ')
+    lines.push(`  ${entityName}: ${fieldNames || 'never'}`)
+  })
+  lines.push(`}`)
+  lines.push('')
+
+  // Helper function to map field type to filter type
+  const getFilterType = (field: Field): string => {
+    switch (field.type) {
+      case 'string':
+        return 'StringFilter'
+      case 'int':
+        return 'NumberFilter'
+      case 'bool':
+        return 'BooleanFilter'
+      case 'datetime':
+      case 'date':
+        return 'DateFilter'
+      case 'json':
+        return 'JsonFilter'
+      case 'enum':
+        if (field.enum_values && field.enum_values.length > 0) {
+          const enumType = field.enum_values.map(v => `'${v}'`).join(' | ')
+          return `EnumFilter<${enumType}>`
+        }
+        return 'StringFilter'
+      default:
+        return 'unknown'
+    }
+  }
+
+  // Filters map (filter types per entity)
+  lines.push(`// Filter types per entity (for autocomplete)`)
+  lines.push(`// Import filter types: import { StringFilter, NumberFilter, ... } from '@supergraph/use-supergraph'`)
+  lines.push(`export interface EntityFiltersMap {`)
+  entities.forEach(([entityName, entity]) => {
+    const fields = Object.entries(entity.fields || {})
+    if (fields.length > 0) {
+      lines.push(`  ${entityName}: {`)
+      fields.forEach(([fieldName, field]) => {
+        const filterType = getFilterType(field)
+        lines.push(`    ${fieldName}?: ${filterType}`)
+      })
+      lines.push(`  }`)
+    } else {
+      lines.push(`  ${entityName}: Record<string, never>`)
+    }
+  })
+  lines.push(`}`)
+  lines.push('')
+
+  // Query selection config types
+  lines.push(`// Query selection config types`)
+  lines.push(`export type RelationSelectionConfig<T extends EntityName = EntityName> = SelectionConfig<T> | true | string[]`)
+  lines.push('')
+  lines.push(`export interface SelectionConfig<T extends EntityName = EntityName> {`)
+  lines.push(`  fields?: true | string[]`)
+  lines.push(`  relations?: T extends keyof EntityRelationsMap`)
+  lines.push(`    ? { [K in keyof EntityRelationsMap[T]]?: RelationSelectionConfig<EntityRelationsMap[T][K] & EntityName> }`)
+  lines.push(`    : Record<string, RelationSelectionConfig>`)
+  lines.push(`  exclude?: string[]`)
+  lines.push(`}`)
+  lines.push('')
+
+  // Create input types (without id and relations)
+  lines.push(`// Create input types (for POST requests - without id and relations)`)
+  entities.forEach(([entityName, entity]) => {
+    const relationNames = Object.keys(entity.relations || {})
+    if (relationNames.length > 0) {
+      const excludeFields = [...relationNames, ...relationNames.map(r => `${r}Count`)].map(f => `'${f}'`).join(' | ')
+      lines.push(`export type ${entityName}CreateInput = Omit<${entityName}, 'id' | ${excludeFields}>`)
+    } else {
+      lines.push(`export type ${entityName}CreateInput = Omit<${entityName}, 'id'>`)
+    }
   })
   lines.push('')
 
-  // Update input types (all fields optional except id)
-  lines.push(`// Update input types (for PATCH requests)`)
-  entities.forEach(([entityName]) => {
-    lines.push(`export type ${entityName}UpdateInput = Partial<Omit<${entityName}, 'id'>> & { id: number }`)
+  // Update input types (all fields optional except id, without relations)
+  lines.push(`// Update input types (for PATCH requests - all fields optional except id)`)
+  entities.forEach(([entityName, entity]) => {
+    const relationNames = Object.keys(entity.relations || {})
+    if (relationNames.length > 0) {
+      const excludeFields = [...relationNames, ...relationNames.map(r => `${r}Count`)].map(f => `'${f}'`).join(' | ')
+      lines.push(`export type ${entityName}UpdateInput = Partial<Omit<${entityName}, 'id' | ${excludeFields}>> & { id: number }`)
+    } else {
+      lines.push(`export type ${entityName}UpdateInput = Partial<Omit<${entityName}, 'id'>> & { id: number }`)
+    }
   })
   lines.push('')
 
@@ -180,6 +308,24 @@ function generateTypeScript(graph: Graph): string {
     wrapLine(serviceLine, '  ').forEach(l => lines.push(l))
   })
   lines.push(`} as const`)
+  lines.push('')
+
+  // Query example
+  lines.push(`// ============================================================================`)
+  lines.push(`// Query Examples`)
+  lines.push(`// ============================================================================`)
+  lines.push(`//`)
+  lines.push(`// Example: Query with relations`)
+  lines.push(`// const query = {`)
+  lines.push(`//   Property: {`)
+  lines.push(`//     fields: ['id', 'name', 'status'],`)
+  lines.push(`//     limit: 100,`)
+  lines.push(`//     relations: {`)
+  lines.push(`//       owners: { fields: ['id', 'first_name', 'last_name'] },`)
+  lines.push(`//       tenants: { fields: ['id', 'first_name'] }`)
+  lines.push(`//     }`)
+  lines.push(`//   }`)
+  lines.push(`// }`)
   lines.push('')
 
   return lines.join('\n')

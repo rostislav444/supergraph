@@ -522,7 +522,7 @@ function PaginationControls({
           <span className="text-gray-500">Show:</span>
           <select
             value={pageSize === Infinity ? 'all' : pageSize}
-            onChange={(e) => { setPageSize(e.target.value === 'all' ? Infinity : Number(e.target.value)); setCurrentPage(1) }}
+            onChange={(e) => setPageSize(e.target.value === 'all' ? Infinity : Number(e.target.value))}
             className="bg-gray-700 text-gray-300 text-xs px-2 py-1 rounded border border-gray-600"
           >
             <option value={50}>50</option>
@@ -624,6 +624,18 @@ function ResultTable({ data, depth = 0 }) {
   // Use Redux for filters and pagination (persisted state)
   const filters = useSelector(selectTableFilters)
   const { pageSize, currentPage } = useSelector(selectTablePagination)
+
+  // Refs to always get the latest values (avoid stale closures)
+  const queryTextRef = useRef(queryText)
+  const filtersRef = useRef(filters)
+  const rootEntityRef = useRef(rootEntity)
+  const pageSizeRef = useRef(pageSize)
+  const currentPageRef = useRef(currentPage)
+  queryTextRef.current = queryText
+  filtersRef.current = filters
+  rootEntityRef.current = rootEntity
+  pageSizeRef.current = pageSize
+  currentPageRef.current = currentPage
   const displaySnapshot = useSelector(selectDisplaySnapshot)
   const schemaColumnDefinitions = useSelector(selectDisplayColumnDefinitions)
   const lastSuccessfulColumns = useSelector(selectLastSuccessfulColumns)
@@ -686,16 +698,25 @@ function ResultTable({ data, depth = 0 }) {
     dispatch(executeQuery(JSON.stringify(query)))
   }, [dispatch, getTargetEntity, graph])
 
-  // Extract items from data (if available)
-  const items = data
-    ? (Array.isArray(data) ? data : data.items || [data])
-    : []
+  // Extract items from data (if available) - memoized to prevent infinite loops
+  const items = useMemo(() => {
+    if (!data) return []
+    if (Array.isArray(data)) return data
+    return data.items || [data]
+  }, [data])
 
   // Extract total count from backend response (if available)
   const totalInDatabase = data?.pagination?.total ?? data?.total ?? data?.count ?? null
 
+  // Stable empty array reference to prevent unnecessary re-renders
+  const EMPTY_ARRAY = useMemo(() => [], [])
+
   // Get selected fields for the root entity from builder state (LIVE - updates immediately when checkboxes change)
-  const selectedFields = rootEntity ? (builderSelectedFields[rootEntity] || []) : []
+  // Memoized to prevent creating new array reference on each render
+  const selectedFields = useMemo(() => {
+    if (!rootEntity) return EMPTY_ARRAY
+    return builderSelectedFields[rootEntity] || EMPTY_ARRAY
+  }, [rootEntity, builderSelectedFields, EMPTY_ARRAY])
 
   // Get column definitions from schema for selected fields
   const liveColumnDefinitions = useMemo(() => {
@@ -717,18 +738,32 @@ function ResultTable({ data, depth = 0 }) {
   }, [rootEntity, graph, selectedFields])
 
   // Cleanup filters for fields that are no longer selected
+  // Use ref to track last cleaned fields and avoid unnecessary dispatches
+  const lastCleanedFieldsRef = useRef<string>('')
   useEffect(() => {
     if (selectedFields.length > 0) {
-      dispatch(cleanupInactiveFilters({ activeFields: selectedFields }))
+      const fieldsKey = selectedFields.join(',')
+      if (fieldsKey !== lastCleanedFieldsRef.current) {
+        lastCleanedFieldsRef.current = fieldsKey
+        dispatch(cleanupInactiveFilters({ activeFields: selectedFields }))
+      }
     }
   }, [dispatch, selectedFields])
 
   // Save successful columns when response has data
+  // Use ref to track last saved columns and avoid unnecessary dispatches
+  const lastSavedColumnsRef = useRef<string[]>([])
   useEffect(() => {
     if (items.length > 0) {
       const rawKeys = [...new Set(items.flatMap(item => Object.keys(item || {})))]
       const columns = sortColumns(rawKeys.filter(key => key !== 'id' || selectedFields.includes('id')))
-      dispatch(setLastSuccessfulColumns({ columns }))
+      // Only dispatch if columns actually changed
+      const columnsKey = columns.join(',')
+      const lastKey = lastSavedColumnsRef.current.join(',')
+      if (columnsKey !== lastKey) {
+        lastSavedColumnsRef.current = columns
+        dispatch(setLastSuccessfulColumns({ columns }))
+      }
     }
   }, [dispatch, items, selectedFields])
 
@@ -793,6 +828,10 @@ function ResultTable({ data, depth = 0 }) {
     return types
   }, [allKeys, liveColumnDefinitions, items])
 
+  // Ref for columnTypes to avoid stale closures
+  const columnTypesRef = useRef(columnTypes)
+  columnTypesRef.current = columnTypes
+
   // Get unique values for enum columns - prefer schema, fallback to data
   const enumValues = useMemo(() => {
     const enums = {}
@@ -809,13 +848,28 @@ function ResultTable({ data, depth = 0 }) {
     return enums
   }, [allKeys, liveColumnDefinitions, columnTypes, items])
 
-  // Build backend filters from UI filters and execute query
-  const executeWithFilters = useCallback((newFilters, newColumnTypes) => {
-    if (!rootEntity) return
-
+  // Build backend filters and pagination from UI state and execute query
+  // Uses refs to always get the latest values and avoid stale closures
+  const executeWithParams = useCallback((newFilters, newColumnTypes, newPageSize?: number, newCurrentPage?: number) => {
     try {
-      const parsed = JSON.parse(queryText)
-      const entityQuery = parsed[rootEntity]
+      // Use refs to get the latest values
+      const currentQueryText = queryTextRef.current
+      const currentRootEntity = rootEntityRef.current
+
+      const parsed = JSON.parse(currentQueryText)
+
+      // Try to find the entity - first from builder, then from query itself
+      let entityName = currentRootEntity
+      if (!entityName || !parsed[entityName]) {
+        // Extract entity from query (first key that looks like an entity query)
+        const possibleEntities = Object.keys(parsed).filter(key =>
+          typeof parsed[key] === 'object' && parsed[key] !== null && !['transaction', 'create', 'update', 'delete', 'rewrite'].includes(key)
+        )
+        entityName = possibleEntities[0]
+      }
+
+      if (!entityName) return
+      const entityQuery = parsed[entityName]
       if (!entityQuery) return
 
       // Build backend filter object
@@ -837,32 +891,52 @@ function ResultTable({ data, depth = 0 }) {
         backendFilters[`${field}${suffix}`] = value
       }
 
-      // Update query with new filters
+      // Calculate limit and offset (use refs for fallback values)
+      const effectivePageSize = newPageSize ?? pageSizeRef.current
+      const effectiveCurrentPage = newCurrentPage ?? currentPageRef.current
+      const limit = effectivePageSize === Infinity ? undefined : effectivePageSize
+      const offset = effectivePageSize === Infinity ? undefined : (effectiveCurrentPage - 1) * effectivePageSize
+
+      // Update query with new filters and pagination
       const newQuery = {
         ...parsed,
-        [rootEntity]: {
+        [entityName]: {
           ...entityQuery,
-          filters: Object.keys(backendFilters).length > 0 ? backendFilters : undefined
+          filters: Object.keys(backendFilters).length > 0 ? backendFilters : undefined,
+          limit: limit,
+          offset: offset && offset > 0 ? offset : undefined
         }
       }
 
-      // Clean up undefined filters
-      if (!newQuery[rootEntity].filters) {
-        delete newQuery[rootEntity].filters
+      // Clean up undefined values
+      if (!newQuery[entityName].filters) {
+        delete newQuery[entityName].filters
+      }
+      if (newQuery[entityName].limit === undefined) {
+        delete newQuery[entityName].limit
+      }
+      if (newQuery[entityName].offset === undefined) {
+        delete newQuery[entityName].offset
       }
 
       const newQueryText = JSON.stringify(newQuery, null, 2)
       dispatch(setQueryText(newQueryText))
       dispatch(executeQuery(newQueryText))
     } catch (e) {
-      console.error('Failed to update query with filters:', e)
+      console.error('Failed to update query with params:', e)
     }
-  }, [rootEntity, queryText, dispatch])
+  }, [dispatch]) // Uses refs for queryText/rootEntity, receives pageSize/currentPage as params
 
-  // Pagination (now based on items, not client-filtered)
-  const totalPages = pageSize === Infinity ? 1 : Math.ceil(items.length / pageSize)
-  const startIdx = (currentPage - 1) * pageSize
-  const paginatedItems = pageSize === Infinity ? items : items.slice(startIdx, startIdx + pageSize)
+  // Alias for backwards compatibility
+  const executeWithFilters = useCallback((newFilters, newColumnTypes) => {
+    executeWithParams(newFilters, newColumnTypes)
+  }, [executeWithParams])
+
+  // Pagination - now server-side, items are already paginated from backend
+  const totalRecords = totalInDatabase ?? items.length
+  const totalPages = pageSize === Infinity ? 1 : Math.ceil(totalRecords / pageSize)
+  // No client-side slicing needed - backend returns paginated data
+  const paginatedItems = items
 
   // Check if any filters are active
   const hasFilters = Object.values(filters).some(f => f?.value)
@@ -1015,21 +1089,26 @@ function ResultTable({ data, depth = 0 }) {
     )
   }
 
-  // Wrapper functions for Redux pagination dispatch
+  // Wrapper functions for Redux pagination dispatch - now triggers backend query
+  // Uses refs to avoid stale closures
   const handleSetPageSize = useCallback((size) => {
-    dispatch(setTablePagination({ pageSize: size }))
-  }, [dispatch])
+    dispatch(setTablePagination({ pageSize: size, currentPage: 1 }))
+    // Execute query with new pagination (use refs for latest values)
+    executeWithParams(filtersRef.current, columnTypesRef.current, size, 1)
+  }, [dispatch, executeWithParams])
 
   const handleSetCurrentPage = useCallback((page) => {
     // Support both direct value and function updater
-    const newPage = typeof page === 'function' ? page(currentPage) : page
+    const newPage = typeof page === 'function' ? page(currentPageRef.current) : page
     dispatch(setTablePagination({ currentPage: newPage }))
-  }, [dispatch, currentPage])
+    // Execute query with new pagination (use refs for latest values)
+    executeWithParams(filtersRef.current, columnTypesRef.current, pageSizeRef.current, newPage)
+  }, [dispatch, executeWithParams])
 
   // Pagination props
   const paginationProps = {
     filteredCount: items.length,
-    totalCount: items.length,
+    totalCount: totalRecords,
     totalInDatabase,
     hasFilters,
     pageSize,

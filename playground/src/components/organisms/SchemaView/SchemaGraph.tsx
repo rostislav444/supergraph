@@ -12,6 +12,9 @@ import {
   useReactFlow,
   ReactFlowProvider,
   Handle,
+  BaseEdge,
+  EdgeProps,
+  getSmoothStepPath,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import ELK from 'elkjs/lib/elk.bundled.js'
@@ -260,9 +263,190 @@ function ServiceGroupNode({
   )
 }
 
+// Custom edge component with offset support for parallel edges
+function OffsetEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style,
+  markerEnd,
+  label,
+  labelStyle,
+  labelBgStyle,
+  labelBgPadding,
+  labelBgBorderRadius,
+  data,
+}: EdgeProps) {
+  const offset = (data?.offset as number) || 0
+  const EDGE_SPACING = 10 // pixels between parallel edges
+
+  // Calculate the perpendicular offset based on edge direction
+  const dx = targetX - sourceX
+  const dy = targetY - sourceY
+
+  // Apply offset - for smooth step edges, offset at connection points
+  const offsetAmount = offset * EDGE_SPACING
+
+  // For horizontal-ish edges, offset vertically at connection points
+  // For vertical-ish edges, offset horizontally at connection points
+  const isHorizontal = Math.abs(dx) > Math.abs(dy)
+
+  let offsetSourceX = sourceX
+  let offsetSourceY = sourceY
+  let offsetTargetX = targetX
+  let offsetTargetY = targetY
+
+  if (isHorizontal) {
+    // Offset vertically for horizontal edges
+    offsetSourceY = sourceY + offsetAmount
+    offsetTargetY = targetY + offsetAmount
+  } else {
+    // Offset horizontally for vertical edges
+    offsetSourceX = sourceX + offsetAmount
+    offsetTargetX = targetX + offsetAmount
+  }
+
+  // Get the path with offset positions
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
+    sourceX: offsetSourceX,
+    sourceY: offsetSourceY,
+    sourcePosition,
+    targetX: offsetTargetX,
+    targetY: offsetTargetY,
+    targetPosition,
+    borderRadius: 8,
+  })
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={style}
+        markerEnd={markerEnd}
+      />
+      {label && (
+        <g transform={`translate(${labelX}, ${labelY})`}>
+          <rect
+            x={-(labelBgPadding as [number, number])?.[0] || -4}
+            y={-8}
+            width={String(label).length * 6 + ((labelBgPadding as [number, number])?.[0] || 4) * 2}
+            height={16}
+            rx={labelBgBorderRadius || 4}
+            style={labelBgStyle as React.CSSProperties}
+          />
+          <text
+            style={labelStyle as React.CSSProperties}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="react-flow__edge-text"
+          >
+            {String(label)}
+          </text>
+        </g>
+      )}
+    </>
+  )
+}
+
 const nodeTypes = {
   entity: EntityNode,
   serviceGroup: ServiceGroupNode,
+}
+
+const edgeTypes = {
+  offset: OffsetEdge,
+}
+
+// Calculate edge offsets to prevent overlapping
+// Groups edges by their endpoints and handles to assign perpendicular offsets
+function calculateEdgeOffsets(edges: Edge[]): Edge[] {
+  // Group edges by:
+  // 1. Same source-target pair (bidirectional corridors)
+  // 2. Same target node + handle (multiple edges entering same point)
+  // 3. Same source node + handle (multiple edges leaving same point)
+
+  const edgeGroups: Record<string, Edge[]> = {}
+
+  edges.forEach(edge => {
+    // Create normalized key for source-target pair
+    const pairKey = edge.source < edge.target
+      ? `pair::${edge.source}::${edge.target}`
+      : `pair::${edge.target}::${edge.source}`
+
+    if (!edgeGroups[pairKey]) edgeGroups[pairKey] = []
+    edgeGroups[pairKey].push(edge)
+  })
+
+  // Also group by target handle to handle edges coming from different sources
+  const targetHandleGroups: Record<string, Edge[]> = {}
+  edges.forEach(edge => {
+    const targetKey = `target::${edge.target}::${edge.targetHandle || 'default'}`
+    if (!targetHandleGroups[targetKey]) targetHandleGroups[targetKey] = []
+    targetHandleGroups[targetKey].push(edge)
+  })
+
+  // Also group by source handle
+  const sourceHandleGroups: Record<string, Edge[]> = {}
+  edges.forEach(edge => {
+    const sourceKey = `source::${edge.source}::${edge.sourceHandle || 'default'}`
+    if (!sourceHandleGroups[sourceKey]) sourceHandleGroups[sourceKey] = []
+    sourceHandleGroups[sourceKey].push(edge)
+  })
+
+  // Calculate offsets - prioritize pair grouping, then handle grouping
+  const edgeOffsets = new Map<string, number>()
+
+  // First pass: pair-based offsets
+  Object.values(edgeGroups).forEach(group => {
+    if (group.length > 1) {
+      const count = group.length
+      const startOffset = -(count - 1) / 2
+      group.forEach((edge, index) => {
+        edgeOffsets.set(edge.id, startOffset + index)
+      })
+    }
+  })
+
+  // Second pass: target handle offsets (for edges not already offset)
+  Object.values(targetHandleGroups).forEach(group => {
+    if (group.length > 1) {
+      // Filter to edges not already in a pair group
+      const unoffseted = group.filter(e => !edgeOffsets.has(e.id))
+      if (unoffseted.length > 1) {
+        const count = unoffseted.length
+        const startOffset = -(count - 1) / 2
+        unoffseted.forEach((edge, index) => {
+          edgeOffsets.set(edge.id, startOffset + index)
+        })
+      }
+    }
+  })
+
+  // Third pass: source handle offsets
+  Object.values(sourceHandleGroups).forEach(group => {
+    if (group.length > 1) {
+      const unoffseted = group.filter(e => !edgeOffsets.has(e.id))
+      if (unoffseted.length > 1) {
+        const count = unoffseted.length
+        const startOffset = -(count - 1) / 2
+        unoffseted.forEach((edge, index) => {
+          edgeOffsets.set(edge.id, startOffset + index)
+        })
+      }
+    }
+  })
+
+  // Apply offsets to edges
+  return edges.map(edge => ({
+    ...edge,
+    type: 'offset',
+    data: { ...edge.data, offset: edgeOffsets.get(edge.id) || 0 },
+  }))
 }
 
 // ELK instance
@@ -616,7 +800,10 @@ async function applyElkLayout(
     }
   })
 
-  return { nodes: allNodes, edges: adjustedEdges }
+  // Apply edge offsets to prevent overlapping
+  const offsetEdges = calculateEdgeOffsets(adjustedEdges)
+
+  return { nodes: allNodes, edges: offsetEdges }
 }
 
 function SchemaGraphInner({ graph }: SchemaGraphProps) {
@@ -1100,6 +1287,7 @@ function SchemaGraphInner({ graph }: SchemaGraphProps) {
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         nodesDraggable={isDragEnabled}
         fitView
         fitViewOptions={{ padding: 0.1 }}

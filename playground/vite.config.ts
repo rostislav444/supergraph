@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      outDir: path.resolve(__dirname, '../src/supergraph/playground/dist'),
+      outDir: path.resolve(__dirname, 'dist'),
       emptyOutDir: true,
     },
     server: {

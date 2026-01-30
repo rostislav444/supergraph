@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,7 +25,9 @@ from fastapi.staticfiles import StaticFiles
 
 
 # Path to bundled frontend (populated during package build)
-DIST_PATH = Path(__file__).parent / "dist"
+# Can be overridden via SUPERGRAPH_PLAYGROUND_DIST environment variable
+_dist_override = os.environ.get("SUPERGRAPH_PLAYGROUND_DIST")
+DIST_PATH = Path(_dist_override) if _dist_override else Path(__file__).parent / "dist"
 
 
 def get_playground_html(

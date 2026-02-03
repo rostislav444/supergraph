@@ -7,7 +7,7 @@ Makes POST /internal/query calls to services with normalized filters.
 from __future__ import annotations
 
 
-from typing import Any
+from typing import Any, List, Optional
 
 import httpx
 
@@ -24,11 +24,14 @@ class ServiceClient:
     """
     HTTP client for internal service queries.
 
+    All services expose a unified /internal/query endpoint.
+    Entity name is passed in the request body.
+
     Usage:
         client = ServiceClient()
         response = await client.fetch(
             service_url="http://person:8002",
-            resource="/person",
+            entity="Person",
             filters=[NormalizedFilter(field="id", op="in", value=[1,2,3])],
             fields=["id", "first_name"],
         )
@@ -59,26 +62,24 @@ class ServiceClient:
     async def fetch(
         self,
         service_url: str,
-        resource: str,
+        entity: str,
         filters: list[NormalizedFilter],
         fields: list[str],
         order: Optional[List[NormalizedOrder]] = None,
         limit: Optional[int] = None,
         offset: int = 0,
-        entity: Optional[str] = None,
     ) -> InternalQueryResponse:
         """
-        Fetch data from a service.
+        Fetch data from a service via /internal/query endpoint.
 
         Args:
             service_url: Base URL of the service (e.g., "http://person:8002")
-            resource: Resource path (e.g., "/person") - used for legacy per-entity endpoints
+            entity: Entity name (e.g., "Person", "PropertyType")
             filters: List of normalized filters
             fields: List of fields to return
             order: Optional ordering
             limit: Optional limit for pagination
             offset: Offset for pagination
-            entity: Entity name for unified endpoints (e.g., "PropertyType")
 
         Returns:
             InternalQueryResponse with items and pagination info
@@ -130,22 +131,20 @@ class ServiceClient:
     async def fetch_by_ids(
         self,
         service_url: str,
-        resource: str,
+        entity: str,
         ids: list[Any],
         id_field: str,
         fields: list[str],
-        entity: Optional[str] = None,
     ) -> InternalQueryResponse:
         """
         Convenience method to fetch by a list of IDs.
 
         Args:
             service_url: Base URL of the service
-            resource: Resource path (legacy, kept for compatibility)
+            entity: Entity name (e.g., "Person")
             ids: List of IDs to fetch
             id_field: Field name to filter on (usually "id")
             fields: List of fields to return
-            entity: Entity name for unified endpoints
 
         Returns:
             InternalQueryResponse with items
@@ -156,10 +155,9 @@ class ServiceClient:
         filters = [NormalizedFilter(field=id_field, op="in", value=ids)]
         return await self.fetch(
             service_url=service_url,
-            resource=resource,
+            entity=entity,
             filters=filters,
             fields=fields,
             limit=None,  # No limit when fetching by IDs
             offset=0,
-            entity=entity,
         )

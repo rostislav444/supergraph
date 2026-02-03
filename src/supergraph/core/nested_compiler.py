@@ -153,17 +153,20 @@ class NestedCompiler:
                 steps.append(target_step)
 
                 # If relation goes through intermediate model, create the link
-                if "through" in rel_def:
-                    through = rel_def["through"]
-                    relationship_type = item.get("relation_type") or through.get("relationship_type", "")
+                kind = rel_def.get("kind", "")
 
-                    # Determine which model to use for the relationship
-                    through_model = through.get("model", "Relationship")
+                if kind == "provider":
+                    # Provider-based relation (through relations service)
+                    relationship_type = item.get("relation_type") or rel_def.get("type", "")
+                    direction = rel_def.get("direction", "out")
 
-                    # Build relationship data
-                    # Parent match field links to parent, target key field links to target
-                    parent_match_field = through.get("parent_match_field", "object_id")
-                    target_key_field = through.get("target_key_field", "subject_id")
+                    # Determine field mapping based on direction
+                    if direction == "out":
+                        parent_match_field = "object_id"
+                        target_key_field = "subject_id"
+                    else:
+                        parent_match_field = "subject_id"
+                        target_key_field = "object_id"
 
                     rel_data = {
                         parent_match_field: f"{root_alias}.id",
@@ -173,21 +176,20 @@ class NestedCompiler:
                     if relationship_type:
                         rel_data["relationship_type"] = relationship_type
 
-                    # Add any static filters as data
-                    static_filters = through.get("static_filters", {})
-                    for key, value in static_filters.items():
-                        if key not in rel_data:
-                            rel_data[key] = value
+                    # Add status if specified
+                    status = rel_def.get("status")
+                    if status:
+                        rel_data["status"] = status
 
                     # Create relationship record
                     link_step = TransactionStep(
                         operation="create",
-                        entity=through_model,
+                        entity="Relationship",
                         data=rel_data,
                     )
                     steps.append(link_step)
 
-                elif "ref" in rel_def:
+                elif kind == "ref":
                     # Direct FK relation - update the parent with the FK
                     ref = rel_def["ref"]
                     from_field = ref.get("from_field")

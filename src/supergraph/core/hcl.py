@@ -197,26 +197,17 @@ def _format_field(field_name: str, field_def: dict) -> list[str]:
 
 
 def _format_relation(rel_name: str, rel_def: dict) -> list[str]:
-    """Format a relation in HCL format."""
+    """
+    Format a relation in HCL format.
+
+    Relations must have a `kind` field (provider or ref).
+    """
     lines = []
     kind = rel_def.get("kind", "")
 
     # Provider-based relation using preset
     if kind == "provider" and rel_def.get("preset"):
         lines.append(f'  rel "{rel_name}" {{ use = "{rel_def["preset"]}" }}')
-
-    # Ref relation (direct FK)
-    elif kind == "ref" or ("ref" in rel_def and "through" not in rel_def):
-        ref = rel_def.get("ref", {})
-        from_field = ref.get("from_field", "")
-        to_entity = ref.get("to_entity", rel_def.get("target", ""))
-        to_field = ref.get("to_field", "id")
-        cardinality = rel_def.get("cardinality", "many")
-
-        lines.append(f'  rel "{rel_name}" {{')
-        lines.append(f'    ref {{ from = "{from_field}" to = "{to_entity}.{to_field}" }}')
-        lines.append(f'    cardinality = "{cardinality}"')
-        lines.append("  }")
 
     # Provider relation (inline, no preset)
     elif kind == "provider":
@@ -231,18 +222,21 @@ def _format_relation(rel_name: str, rel_def: dict) -> list[str]:
         lines.append(f'    cardinality = "{rel_def.get("cardinality", "many")}"')
         lines.append("  }")
 
-    # Legacy through relation -> show as provider
-    elif "through" in rel_def:
-        through = rel_def["through"]
-        direction = "out" if through.get("parent_match_field") == "object_id" else "in"
+    # Ref relation (direct FK)
+    elif kind == "ref":
+        ref = rel_def.get("ref", {})
+        from_field = ref.get("from_field", "")
+        to_entity = ref.get("to_entity", rel_def.get("target", ""))
+        to_field = ref.get("to_field", "id")
+        cardinality = rel_def.get("cardinality", "many")
+
         lines.append(f'  rel "{rel_name}" {{')
-        lines.append('    provider    = "relations_db"')
-        if through.get("relationship_type"):
-            lines.append(f'    type        = "{through["relationship_type"]}"')
-        lines.append(f'    direction   = "{direction}"')
-        lines.append(f'    target      = "{rel_def.get("target", "")}"')
-        lines.append(f'    cardinality = "{rel_def.get("cardinality", "many")}"')
+        lines.append(f'    ref {{ from = "{from_field}" to = "{to_entity}.{to_field}" }}')
+        lines.append(f'    cardinality = "{cardinality}"')
         lines.append("  }")
+
+    # Unknown kind - skip with no output
+    # (validation should catch this earlier)
 
     return lines
 
@@ -292,7 +286,6 @@ def transform_graph_to_new_format(graph: dict[str, Any]) -> dict[str, Any]:
     for entity_name, entity_def in graph.get("entities", {}).items():
         new_entity = {
             "service": entity_def["service"],
-            "resource": entity_def.get("resource", "/" + entity_name.lower()),
             "keys": entity_def.get("keys", ["id"]),
             "fields": entity_def.get("fields", {}),
             "access": entity_def.get("access", {"tenant_strategy": "none"}),
@@ -300,6 +293,11 @@ def transform_graph_to_new_format(graph: dict[str, Any]) -> dict[str, Any]:
         }
 
         for rel_name, rel_def in entity_def.get("relations", {}).items():
+            # Skip already-normalized relations (idempotent transform)
+            if rel_def.get("kind"):
+                new_entity["relations"][rel_name] = rel_def
+                continue
+
             if "through" in rel_def:
                 # Convert through to provider relation
                 through = rel_def["through"]

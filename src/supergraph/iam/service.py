@@ -80,15 +80,32 @@ class IAMService:
         scopes: list[IAMScope] = []
 
         # Apply tenant restrictions based on strategy
-        if tenant_strategy == "direct" and principal.rc_ids:
+        if tenant_strategy == "direct":
             tenant_field = access_def.get("tenant_field", "rc_id")
-            scopes.append(
-                IAMScope(
-                    field=tenant_field,
-                    op="in",
-                    values=principal.rc_ids,
+
+            # Determine which tenant values to use based on the field
+            tenant_values = []
+
+            if tenant_field == "rc_id" and principal.rc_ids:
+                # Use rc_ids for residential complex filtering
+                tenant_values = principal.rc_ids
+            elif tenant_field == "company_id" and principal.extra.get("company_ids"):
+                # Use company_ids from extra for company filtering
+                tenant_values = principal.extra["company_ids"]
+            elif tenant_field == "id" and principal.extra.get("company_ids"):
+                # Special case: Company entity filters by its own id field
+                # Use company_ids from extra
+                tenant_values = principal.extra["company_ids"]
+
+            # Add scope if we have tenant values
+            if tenant_values:
+                scopes.append(
+                    IAMScope(
+                        field=tenant_field,
+                        op="in",
+                        values=tenant_values,
+                    )
                 )
-            )
 
         return IAMResponse(
             allow=True,

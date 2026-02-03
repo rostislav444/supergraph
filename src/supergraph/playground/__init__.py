@@ -126,6 +126,17 @@ def mount_playground(
             assets_path=assets_path,
         )
 
+    # Mount IAM Visualizer
+    static_path = Path(__file__).parent / "static"
+    if static_path.exists():
+        @app.get(f"{path}/iam-visualizer.html", response_class=HTMLResponse, include_in_schema=False)
+        async def iam_visualizer():
+            """IAM Role Bindings Visualizer."""
+            iam_html_path = static_path / "iam-visualizer.html"
+            if iam_html_path.exists():
+                return iam_html_path.read_text()
+            return "<h1>IAM Visualizer not found</h1>"
+
 
 def is_bundled() -> bool:
     """Check if the playground is bundled."""

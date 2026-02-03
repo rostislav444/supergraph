@@ -12,6 +12,8 @@ import MonacoEditor from './components/MonacoEditor'
 import ResultViewer from './components/ResultViewer'
 import DocumentationPanel from './components/DocumentationPanel'
 import FormEditor from './components/FormEditor'
+import IAMVisualizer from './components/IAMVisualizer'
+import IAMAdmin from './components/IAMAdmin'
 
 // Atoms & Molecules
 import { ResizeHandle } from '@atoms/ResizeHandle'
@@ -231,7 +233,7 @@ function AppContent() {
                 onClick={() => handleViewChange('explorer')}
                 className={clsx(
                   'px-3 py-1 text-sm font-medium rounded-md transition-all',
-                  !isSchemaPage ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                  !isSchemaPage && !location.pathname.startsWith('/iam') ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
                 )}
               >
                 Explorer
@@ -244,6 +246,15 @@ function AppContent() {
                 )}
               >
                 Schema
+              </button>
+              <button
+                onClick={() => navigate('/iam')}
+                className={clsx(
+                  'px-3 py-1 text-sm font-medium rounded-md transition-all',
+                  location.pathname.startsWith('/iam') ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                )}
+              >
+                🔐 IAM
               </button>
             </div>
             {!isSchemaPage && (
@@ -287,7 +298,7 @@ function AppContent() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-hidden">
+      <main className={clsx('flex-1', location.pathname === '/' ? 'overflow-hidden' : 'overflow-auto')}>
         <Routes>
           <Route
             path="/"
@@ -332,6 +343,10 @@ function AppContent() {
           <Route path="/schema/hcl" element={<SchemaView graph={graph} viewMode="hcl" />} />
           <Route path="/schema/json" element={<SchemaView graph={graph} viewMode="json" />} />
           <Route path="/schema/typescript" element={<SchemaView graph={graph} viewMode="typescript" />} />
+          <Route path="/iam" element={<IAMVisualizer />} />
+          <Route path="/iam/graph" element={<IAMVisualizer />} />
+          <Route path="/iam/roles" element={<IAMVisualizer />} />
+          <Route path="/iam/policies" element={<IAMVisualizer />} />
         </Routes>
       </main>
     </div>

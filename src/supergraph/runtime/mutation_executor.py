@@ -62,14 +62,6 @@ class MutationExecutor:
 
         return service_def["url"]
 
-    def get_resource_path(self, entity: str) -> str:
-        """Get resource path for entity (deprecated - not used in new format)."""
-        entity_def = self.graph["entities"].get(entity)
-        if not entity_def:
-            raise ExecutionError(f"Unknown entity: {entity}")
-        # New format doesn't have resource - all services use /internal/* endpoints
-        return entity_def.get("resource", "")
-
     async def execute(self, mutation: EntityMutation) -> MutationResult:
         """
         Execute a single mutation.
@@ -82,7 +74,6 @@ class MutationExecutor:
         """
         try:
             base_url = self.get_service_url(mutation.entity)
-            resource = self.get_resource_path(mutation.entity)
 
             # Build internal request
             filters = self._normalize_filters(mutation.filters)

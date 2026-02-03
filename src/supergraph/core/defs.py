@@ -76,7 +76,6 @@ class EntityDef:
     """Complete definition of an entity in the supergraph."""
     name: str
     service: str  # service name
-    resource: str  # API resource path, e.g., "/person"
     keys: list[str]  # primary key fields
     fields: dict[str, FieldDef]
     relations: dict[str, RelationDef] = field(default_factory=dict)

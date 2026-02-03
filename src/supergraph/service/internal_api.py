@@ -254,6 +254,43 @@ class InternalRouter:
 
         return InternalMutationResponse(items=[], count=result.rowcount)
 
+    def _coerce_filter_value(self, field: str, value: Any) -> Any:
+        """
+        Coerce filter value to match the column type.
+
+        Handles string-to-int conversion for integer columns, etc.
+        """
+        if value is None:
+            return value
+
+        mapper = inspect(self.model)
+        column = mapper.columns.get(field)
+        if column is None:
+            return value
+
+        col_type = column.type.__class__.__name__.lower()
+
+        # Integer columns - convert str to int
+        if col_type in ('integer', 'biginteger', 'smallinteger'):
+            if isinstance(value, str):
+                try:
+                    return int(value)
+                except (ValueError, TypeError):
+                    return value
+            elif isinstance(value, list):
+                # For "in" operator
+                return [int(v) if isinstance(v, str) and v.isdigit() else v for v in value]
+
+        # Float columns
+        elif col_type in ('float', 'numeric', 'decimal'):
+            if isinstance(value, str):
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return value
+
+        return value
+
     def _apply_filters(self, stmt, filters: list[NormalizedFilter]):
         """Apply filters to select statement."""
         for f in filters:
@@ -261,22 +298,25 @@ class InternalRouter:
             if column is None:
                 continue
 
+            # Coerce value to match column type
+            value = self._coerce_filter_value(f.field, f.value)
+
             if f.op == "eq":
-                stmt = stmt.where(column == f.value)
+                stmt = stmt.where(column == value)
             elif f.op == "in":
-                stmt = stmt.where(column.in_(f.value))
+                stmt = stmt.where(column.in_(value))
             elif f.op == "gte":
-                stmt = stmt.where(column >= f.value)
+                stmt = stmt.where(column >= value)
             elif f.op == "lte":
-                stmt = stmt.where(column <= f.value)
+                stmt = stmt.where(column <= value)
             elif f.op == "gt":
-                stmt = stmt.where(column > f.value)
+                stmt = stmt.where(column > value)
             elif f.op == "lt":
-                stmt = stmt.where(column < f.value)
+                stmt = stmt.where(column < value)
             elif f.op == "icontains":
-                stmt = stmt.where(column.ilike(f"%{f.value}%"))
+                stmt = stmt.where(column.ilike(f"%{value}%"))
             elif f.op == "isnull":
-                if f.value:
+                if value:
                     stmt = stmt.where(column.is_(None))
                 else:
                     stmt = stmt.where(column.isnot(None))
@@ -290,10 +330,13 @@ class InternalRouter:
             if column is None:
                 continue
 
+            # Coerce value to match column type
+            value = self._coerce_filter_value(f.field, f.value)
+
             if f.op == "eq":
-                stmt = stmt.where(column == f.value)
+                stmt = stmt.where(column == value)
             elif f.op == "in":
-                stmt = stmt.where(column.in_(f.value))
+                stmt = stmt.where(column.in_(value))
 
         return stmt
 
@@ -304,10 +347,13 @@ class InternalRouter:
             if column is None:
                 continue
 
+            # Coerce value to match column type
+            value = self._coerce_filter_value(f.field, f.value)
+
             if f.op == "eq":
-                stmt = stmt.where(column == f.value)
+                stmt = stmt.where(column == value)
             elif f.op == "in":
-                stmt = stmt.where(column.in_(f.value))
+                stmt = stmt.where(column.in_(value))
 
         return stmt
 

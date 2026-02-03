@@ -42,6 +42,10 @@ export default defineConfig(({ mode }) => {
           target: gatewayUrl,
           changeOrigin: true,
         },
+        '/__iam': {
+          target: gatewayUrl,
+          changeOrigin: true,
+        },
         '/entity': {
           target: gatewayUrl,
           changeOrigin: true,

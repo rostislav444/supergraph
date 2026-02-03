@@ -29,10 +29,12 @@ Supports multiple request formats:
 from __future__ import annotations
 
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, List, Literal, Optional
 
 from .errors import ValidationError
+from .utils import to_snake_case
 
 
 # Operation types
@@ -315,7 +317,18 @@ class RequestParser:
         return result
 
     def _parse_legacy_format(self, body: dict) -> ParsedRequest:
-        """Parse legacy format with action/entity at root."""
+        """
+        Parse legacy format with action/entity at root.
+
+        DEPRECATED: Use the new format instead:
+            {"Entity": {"fields": [...], "filters": {...}}}
+        """
+        warnings.warn(
+            "Legacy request format {'action': ..., 'entity': ...} is deprecated. "
+            "Use {'EntityName': {'fields': [...], 'filters': {...}}} instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
         action = body.get("action", "query")
         entity = body["entity"]
 
@@ -339,6 +352,7 @@ def parse_request(
     body: dict[str, Any],
     known_entities: set[str],
     graph: dict | None = None,
+    normalize_case: bool = False,
 ) -> ParsedRequest:
     """
     Convenience function to parse a request.
@@ -347,9 +361,51 @@ def parse_request(
         body: Raw request body
         known_entities: Set of valid entity names
         graph: Full graph schema (needed for nested compilation)
+        normalize_case: If True, converts camelCase relation names to snake_case
 
     Returns:
         ParsedRequest
     """
+    if normalize_case:
+        body = normalize_relation_names(body)
     parser = RequestParser(known_entities, graph)
     return parser.parse(body)
+
+
+def normalize_relation_names(data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Recursively normalize relation names from camelCase to snake_case.
+
+    This allows clients to use camelCase (e.g., "ownedProperties") while
+    the internal schema uses snake_case (e.g., "owned_properties").
+
+    Only normalizes keys in "relations" dicts, preserving entity names
+    and other keys as-is.
+
+    Example:
+        {"Person": {"relations": {"ownedProperties": {...}}}}
+        ->
+        {"Person": {"relations": {"owned_properties": {...}}}}
+    """
+    if not isinstance(data, dict):
+        return data
+
+    result = {}
+    for key, value in data.items():
+        if key == "relations" and isinstance(value, dict):
+            # Normalize relation names
+            result[key] = {
+                to_snake_case(rel_name): normalize_relation_names(rel_data)
+                for rel_name, rel_data in value.items()
+            }
+        elif isinstance(value, dict):
+            result[key] = normalize_relation_names(value)
+        elif isinstance(value, list):
+            result[key] = [
+                normalize_relation_names(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+
+    return result

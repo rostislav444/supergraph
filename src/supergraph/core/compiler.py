@@ -140,13 +140,6 @@ class GraphCompiler:
                     entity=entity_name,
                 )
 
-            # Check resource
-            if not entity.get("resource"):
-                self._add_error(
-                    "Missing resource",
-                    entity=entity_name,
-                )
-
             # Check keys
             keys = entity.get("keys", [])
             if not keys:
@@ -368,7 +361,6 @@ class GraphCompiler:
         """Build entity JSON structure."""
         return {
             "service": entity["service"],
-            "resource": entity["resource"],
             "keys": entity.get("keys", ["id"]),
             "fields": entity.get("fields", {}),
             "relations": entity.get("relations", {}),

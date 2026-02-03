@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IAM Visualizer - Supergraph</title>
+    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reactflow@11/dist/umd/index.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11/dist/style.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .controls label {
+            font-weight: 500;
+        }
+
+        .controls input, .controls select, .controls button {
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .controls button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        .controls button:hover {
+            transform: translateY(-2px);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 15px 30px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .tab:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .view {
+            display: none;
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            min-height: 600px;
+        }
+
+        .view.active {
+            display: block;
+        }
+
+        /* Table View */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-role {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .badge-scope {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .badge-policy {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        /* React Flow View */
+        #flow-container {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #eee;
+            border-radius: 8px;
+        }
+
+        /* Tree View */
+        .tree {
+            font-family: 'Courier New', monospace;
+        }
+
+        .tree-node {
+            padding: 8px 0;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .tree-node:hover {
+            background: #f8f9fa;
+        }
+
+        .tree-icon {
+            display: inline-block;
+            width: 20px;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+
+        .tree-label {
+            font-size: 14px;
+        }
+
+        .tree-children {
+            margin-left: 30px;
+        }
+
+        .tree-node.collapsed > .tree-children {
+            display: none;
+        }
+
+        .node-user { color: #1976d2; font-weight: bold; }
+        .node-role { color: #7b1fa2; }
+        .node-policy { color: #388e3c; }
+        .node-statement { color: #f57c00; }
+        .node-detail { color: #666; font-size: 13px; }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #999;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .stat-number {
+            font-size: 48px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 IAM Visualizer</h1>
+            <p class="subtitle">Role Bindings, Policies & Permissions</p>
+
+            <div class="controls">
+                <label for="user-filter">Filter by User ID:</label>
+                <input type="number" id="user-filter" placeholder="e.g., 100">
+                <button onclick="loadData()">🔄 Refresh</button>
+                <button onclick="exportData()">💾 Export JSON</button>
+            </div>
+        </header>
+
+        <div id="stats" class="stats"></div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('table')">📊 Table View</button>
+            <button class="tab" onclick="switchTab('flow')">🌐 Graph View (React Flow)</button>
+            <button class="tab" onclick="switchTab('tree')">🌳 Tree View</button>
+        </div>
+
+        <div id="table-view" class="view active">
+            <h2 style="margin-bottom: 20px;">Role Bindings Table</h2>
+            <div id="table-content"></div>
+        </div>
+
+        <div id="flow-view" class="view">
+            <h2 style="margin-bottom: 20px;">Interactive Graph</h2>
+            <div id="flow-container"></div>
+        </div>
+
+        <div id="tree-view" class="view">
+            <h2 style="margin-bottom: 20px;">Hierarchical Tree</h2>
+            <div id="tree-content"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentData = null;
+
+        // Switch tabs
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(`${tab}-view`).classList.add('active');
+
+            if (tab === 'flow' && currentData) {
+                renderFlow(currentData);
+            }
+        }
+
+        // Load IAM data
+        async function loadData() {
+            const userId = document.getElementById('user-filter').value;
+            const url = userId ? `/__iam/data?user_id=${userId}` : '/__iam/data';
+
+            try {
+                document.querySelectorAll('.view').forEach(v => {
+                    v.innerHTML = '<div class="loading">⏳ Loading IAM data...</div>';
+                });
+
+                const response = await fetch(url);
+                const result = await response.json();
+                currentData = result.data;
+
+                renderStats(currentData);
+                renderTable(currentData);
+                renderTree(currentData);
+
+            } catch (error) {
+                console.error('Error loading IAM data:', error);
+                document.getElementById('table-content').innerHTML =
+                    `<div class="error">❌ Error loading IAM data: ${error.message}</div>`;
+            }
+        }
+
+        // Render stats
+        function renderStats(data) {
+            const statsHtml = `
+                <div class="stat-card">
+                    <div class="stat-number">${data.bindings.length}</div>
+                    <div class="stat-label">Role Bindings</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${data.roles.length}</div>
+                    <div class="stat-label">Roles</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${data.policies.length}</div>
+                    <div class="stat-label">Policies</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${new Set(data.bindings.map(b => b.user_id)).size}</div>
+                    <div class="stat-label">Users</div>
+                </div>
+            `;
+            document.getElementById('stats').innerHTML = statsHtml;
+        }
+
+        // Render table view
+        function renderTable(data) {
+            if (data.bindings.length === 0) {
+                document.getElementById('table-content').innerHTML =
+                    '<p style="text-align: center; color: #999; padding: 50px;">No role bindings found. Create some using the seed script!</p>';
+                return;
+            }
+
+            let html = '<table><thead><tr><th>User</th><th>Role</th><th>Scope</th><th>Policies</th></tr></thead><tbody>';
+
+            data.bindings.forEach(binding => {
+                const user = binding.user || {};
+                const role = binding.role || {};
+                const roleData = data.roles.find(r => r.id === role.id) || {};
+                const policies = roleData.policies || [];
+
+                const scopeLabel = binding.scope_type
+                    ? `${binding.scope_type}:${binding.scope_id}`
+                    : 'global';
+
+                const policiesHtml = policies.map(p =>
+                    `<span class="badge badge-policy">${p.name}</span>`
+                ).join(' ');
+
+                html += `
+                    <tr>
+                        <td>${user.username || `User ${user.id}`}<br><small style="color: #999;">${user.email || ''}</small></td>
+                        <td><span class="badge badge-role">${role.name}</span></td>
+                        <td><span class="badge badge-scope">${scopeLabel}</span></td>
+                        <td>${policiesHtml || '<i>No policies</i>'}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            document.getElementById('table-content').innerHTML = html;
+        }
+
+        // Render React Flow graph
+        async function renderFlow(data) {
+            const userId = document.getElementById('user-filter').value;
+            const url = userId ? `/__iam/graph?user_id=${userId}` : '/__iam/graph';
+
+            try {
+                const response = await fetch(url);
+                const result = await response.json();
+
+                const { nodes, edges } = result;
+
+                // Apply layout
+                const layoutedNodes = nodes.map((node, i) => {
+                    let x = 100;
+                    let y = i * 120;
+
+                    if (node.type === 'user') {
+                        x = 100;
+                    } else if (node.type === 'role') {
+                        x = 450;
+                    } else if (node.type === 'policy') {
+                        x = 850;
+                    }
+
+                    return { ...node, position: { x, y: y + (i * 10) } };
+                });
+
+                // Create custom node styles
+                const nodeTypes = {
+                    user: ({ data }) => React.createElement('div', {
+                        style: {
+                            padding: '15px 20px',
+                            borderRadius: '10px',
+                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            color: 'white',
+                            border: '3px solid #fff',
+                            boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+                            fontWeight: 'bold',
+                            minWidth: '150px'
+                        }
+                    }, [
+                        React.createElement('div', { style: { fontSize: '20px', marginBottom: '5px' } }, '👤'),
+                        React.createElement('div', null, data.label),
+                        data.email && React.createElement('div', { style: { fontSize: '11px', opacity: 0.8 } }, data.email)
+                    ]),
+                    role: ({ data }) => React.createElement('div', {
+                        style: {
+                            padding: '15px 20px',
+                            borderRadius: '10px',
+                            background: '#f3e5f5',
+                            color: '#7b1fa2',
+                            border: '2px solid #7b1fa2',
+                            fontWeight: '600',
+                            minWidth: '180px'
+                        }
+                    }, [
+                        React.createElement('div', { style: { fontSize: '18px', marginBottom: '5px' } }, '🎭'),
+                        React.createElement('div', null, data.label)
+                    ]),
+                    policy: ({ data }) => React.createElement('div', {
+                        style: {
+                            padding: '15px 20px',
+                            borderRadius: '10px',
+                            background: '#e8f5e9',
+                            color: '#388e3c',
+                            border: '2px solid #388e3c',
+                            fontWeight: '600',
+                            minWidth: '200px'
+                        }
+                    }, [
+                        React.createElement('div', { style: { fontSize: '18px', marginBottom: '5px' } }, '📜'),
+                        React.createElement('div', null, data.label),
+                        React.createElement('div', { style: { fontSize: '11px', marginTop: '5px' } },
+                            `Effect: ${data.effect}`)
+                    ])
+                };
+
+                // Render React Flow
+                const container = document.getElementById('flow-container');
+                const root = ReactDOM.createRoot(container);
+
+                root.render(
+                    React.createElement(ReactFlow.default, {
+                        nodes: layoutedNodes,
+                        edges: edges,
+                        nodeTypes: nodeTypes,
+                        fitView: true,
+                        style: { background: '#fafafa' }
+                    })
+                );
+
+            } catch (error) {
+                console.error('Error rendering flow:', error);
+                document.getElementById('flow-container').innerHTML =
+                    `<div class="error">❌ Error rendering graph: ${error.message}</div>`;
+            }
+        }
+
+        // Render tree view
+        async function renderTree(data) {
+            const userId = document.getElementById('user-filter').value;
+            const url = userId ? `/__iam/tree?user_id=${userId}` : '/__iam/tree';
+
+            try {
+                const response = await fetch(url);
+                const result = await response.json();
+
+                const html = renderTreeNode(result.tree);
+                document.getElementById('tree-content').innerHTML = `<div class="tree">${html}</div>`;
+
+            } catch (error) {
+                console.error('Error rendering tree:', error);
+                document.getElementById('tree-content').innerHTML =
+                    `<div class="error">❌ Error rendering tree: ${error.message}</div>`;
+            }
+        }
+
+        function renderTreeNode(nodes, level = 0) {
+            if (!nodes || nodes.length === 0) return '';
+
+            return nodes.map((node, i) => {
+                const hasChildren = node.children && node.children.length > 0;
+                const icon = hasChildren ? '▼' : '•';
+                const indent = '&nbsp;'.repeat(level * 4);
+
+                let html = `
+                    <div class="tree-node" data-level="${level}">
+                        <span class="tree-icon" onclick="toggleNode(this)">${icon}</span>
+                        <span class="tree-label node-${node.type}">${node.label}</span>
+                        <div class="tree-children">
+                            ${hasChildren ? renderTreeNode(node.children, level + 1) : ''}
+                        </div>
+                    </div>
+                `;
+
+                return html;
+            }).join('');
+        }
+
+        function toggleNode(icon) {
+            const node = icon.closest('.tree-node');
+            const isCollapsed = node.classList.contains('collapsed');
+
+            if (isCollapsed) {
+                node.classList.remove('collapsed');
+                icon.textContent = '▼';
+            } else {
+                node.classList.add('collapsed');
+                icon.textContent = '▶';
+            }
+        }
+
+        // Export data as JSON
+        function exportData() {
+            if (!currentData) {
+                alert('No data to export. Load data first!');
+                return;
+            }
+
+            const dataStr = JSON.stringify(currentData, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'iam-data.json';
+            a.click();
+        }
+
+        // Load data on page load
+        window.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>

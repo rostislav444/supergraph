@@ -521,4 +521,17 @@ def create_supergraph_app(graph: dict) -> APIRouter:
         Configured FastAPI router
     """
     set_graph(graph)
+
+    # Include IAM endpoints
+    try:
+        from .iam_endpoints import router as iam_router
+        router.include_router(iam_router)
+        print("✅ IAM endpoints registered successfully")
+    except ImportError as e:
+        print(f"⚠️  IAM endpoints not available: {e}")
+    except Exception as e:
+        print(f"❌ Error registering IAM endpoints: {e}")
+        import traceback
+        traceback.print_exc()
+
     return router

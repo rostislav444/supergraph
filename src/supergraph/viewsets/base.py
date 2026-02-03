@@ -6,7 +6,7 @@ Models stay pure ORM. All graph configuration lives here.
 Usage:
     class PersonViewSet(ModelViewSet):
         model = Person
-        # service/resource auto-inferred: "person" / "/person"
+        # service auto-inferred: "person"
 
     class RelationshipViewSet(RelationsViewSet):
         model = Relationship
@@ -16,7 +16,7 @@ Usage:
             # Add "ownedProperties" field to Person entity
             AttachRelation(
                 parent_entity="Person",
-                field_name="ownedProperties",
+                name="ownedProperties",
                 target_entity="Property",
                 relationship_type="property_owner",
             ),
@@ -62,31 +62,43 @@ class AttachRelation:
     Used by RelationsViewSet to inject relations into other entities
     without modifying their viewsets.
 
-    Simplified approach:
-    - Auto-infers subject_type/object_type from entity names
-    - Defaults: status="active", id_field="id"
-    - No need for Through class in simple cases
+    Two modes:
+    1. Simplified (via relationship_type): auto-resolves through relations service
+    2. Explicit (via through/ref): manual configuration for complex cases
 
-    Example:
+    Example (simplified):
         AttachRelation(
             parent_entity="Person",        # Add field to Person
-            field_name="ownedProperties",  # Field name
+            name="ownedProperties",        # Relation name
             target_entity="Property",      # Returns Property objects
             relationship_type="property_owner",  # How to find relation
         )
+
+    Example (explicit ref):
+        AttachRelation(
+            parent_entity="Relationship",
+            name="property",
+            target_entity="Property",
+            ref=Ref(from_field="subject_id", to_field="id"),
+            cardinality="one",
+        )
     """
     parent_entity: str          # Entity to attach field to (e.g. "Person")
-    field_name: str             # Name of the GraphQL field (e.g. "ownedProperties")
+    name: str                   # Relation name on parent (e.g. "ownedProperties")
     target_entity: str          # Target entity type (e.g. "Property")
-    relationship_type: str      # Relationship type in DB (e.g. "property_owner")
+    relationship_type: str = "" # Relationship type in DB (optional for ref relations)
 
     # Optional overrides (with sensible defaults)
     parent_id_field: str = "id"
     target_id_field: str = "id"
     filters: dict[str, Any] = field(default_factory=lambda: {"status": "active"})
     cardinality: Literal["one", "many"] = "many"
+    # Direction for provider relations:
+    # "in" = parent is subject (parent.id matches subject_id, get object_id for target)
+    # "out" = parent is object (parent.id matches object_id, get subject_id for target)
+    direction: Literal["in", "out"] = "out"
 
-    # Legacy support (deprecated - use simplified approach above)
+    # Explicit relation configuration (use instead of relationship_type for complex cases)
     through: Through | None = None
     ref: Ref | None = None
 
@@ -327,9 +339,8 @@ class ModelViewSet:
     Example:
         class PersonViewSet(ModelViewSet):
             model = Person
-            # service and resource are auto-inferred from model name
+            # service is auto-inferred from model name
             # service = "person"  (optional override)
-            # resource = "/person"  (optional override)
 
             # Optional overrides
             fields_exclude = ["internal_note"]
@@ -341,7 +352,6 @@ class ModelViewSet:
 
     # Optional - auto-inferred from model name if not specified
     service: Optional[str] = None
-    resource: Optional[str] = None
 
     # Optional field configuration
     fields_include: Optional[List[str]] = None  # None = all fields
@@ -356,8 +366,8 @@ class ModelViewSet:
     # Relations declared directly on this entity
     relations: dict[str, RelationConfig] = {}
 
-    # Access control
-    access: AccessConfig = field(default_factory=AccessConfig.none)
+    # Access control (set at module level below to avoid mutable default)
+    access: AccessConfig
 
     # Cache configuration
     cache: Optional["CacheConfig"] = None
@@ -373,13 +383,6 @@ class ModelViewSet:
         if cls.service is not None:
             return cls.service
         return cls.model.__name__.lower()
-
-    @classmethod
-    def get_resource(cls) -> str:
-        """Get resource path. Auto-inferred from model name if not specified."""
-        if cls.resource is not None:
-            return cls.resource
-        return "/" + cls.model.__name__.lower()
 
     @classmethod
     def get_fields(cls) -> dict[str, dict]:
@@ -435,7 +438,6 @@ class ModelViewSet:
         """Convert to entity dict for GraphJSON."""
         return {
             "service": cls.get_service(),
-            "resource": cls.get_resource(),
             "keys": cls.get_keys(),
             "fields": cls.get_fields(),
             "relations": cls.get_relations(),
@@ -450,7 +452,7 @@ class RelationsViewSet(ModelViewSet):
     In addition to being an entity itself, it can attach relations
     to other entities without modifying their viewsets.
 
-    Example (simplified approach):
+    Example:
         class RelationshipViewSet(RelationsViewSet):
             model = Relationship
             service = "relations"
@@ -459,14 +461,14 @@ class RelationsViewSet(ModelViewSet):
                 # Person.ownedProperties -> [Property]
                 AttachRelation(
                     parent_entity="Person",
-                    field_name="ownedProperties",
+                    name="ownedProperties",
                     target_entity="Property",
                     relationship_type="property_owner",
                 ),
                 # Property.owners -> [Person]
                 AttachRelation(
                     parent_entity="Property",
-                    field_name="owners",
+                    name="owners",
                     target_entity="Person",
                     relationship_type="property_owner",
                 ),

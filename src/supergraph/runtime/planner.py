@@ -30,7 +30,6 @@ class PlanStep:
     id: str
     entity: str
     service: str
-    resource: str
 
     # Filters
     filters: list[NormalizedFilter]  # Client filters (normalized)
@@ -43,11 +42,16 @@ class PlanStep:
     offset: int = 0
 
     # Dependency and attachment
-    depends_on: Optional[str] = None  # ID of parent step
+    depends_on: Optional[str] = None  # ID of parent step (for filters)
     parent_key_field: Optional[str] = None  # Field to extract from parent results
     child_match_field: Optional[str] = None  # Field in this entity to match against parent keys
     attach_as: Optional[str] = None  # Name of relation in response
     cardinality: Literal["one", "many"] | None = None
+
+    # For two-hop relations (provider): attach to a different step than depends_on
+    attach_to_step_id: Optional[str] = None  # Step to attach results to (if different from depends_on's parent)
+    link_through_step_id: Optional[str] = None  # Intermediate step that links this to attach_to
+    link_field: Optional[str] = None  # Field in intermediate step that links to attach_to (e.g., subject_id)
 
     def get_all_filters(self) -> list[NormalizedFilter]:
         """Get combined client filters and guard filters."""
@@ -138,7 +142,6 @@ class QueryPlanner:
     ) -> PlanStep:
         """Create a single plan step."""
         service_name = entity_def.get("service")
-        resource = entity_def.get("resource")
 
         # Start with user-requested fields
         fields = list(selection.fields)
@@ -162,7 +165,6 @@ class QueryPlanner:
             id=self._next_step_id(entity_name),
             entity=entity_name,
             service=service_name,
-            resource=resource,
             filters=filters,
             select_fields=fields,
             order=selection.order,
@@ -186,6 +188,9 @@ class QueryPlanner:
         Plan steps for nested relations.
 
         Recursively creates PlanSteps for each relation in the selection.
+        For provider relations (through Relationship), creates TWO steps:
+        1. Fetch Relationship records matching parent IDs
+        2. Fetch target entities using IDs from Relationship records
         """
         for relation_name, relation_selection in selection.relations.items():
             relation_def = parent_entity_def.get("relations", {}).get(relation_name)
@@ -198,8 +203,32 @@ class QueryPlanner:
                 continue
 
             cardinality = relation_def.get("cardinality", "many")
+            kind = relation_def.get("kind", "")
 
-            # Determine how to link parent to child and what extra fields child needs
+            # Handle provider relations (two-hop through Relationship)
+            if kind == "provider":
+                final_step = self._plan_provider_relation(
+                    relation_name=relation_name,
+                    relation_def=relation_def,
+                    relation_selection=relation_selection,
+                    parent_entity_def=parent_entity_def,
+                    parent_step=parent_step,
+                    target_entity_name=target_entity_name,
+                    target_entity_def=target_entity_def,
+                    cardinality=cardinality,
+                    steps=steps,
+                )
+                if final_step:
+                    # Recursively plan nested relations
+                    self._plan_relations(
+                        selection=relation_selection,
+                        parent_entity_def=target_entity_def,
+                        parent_step=final_step,
+                        steps=steps,
+                    )
+                continue
+
+            # Handle ref and other relation types (single step)
             parent_key_field, child_match_field, extra_filters, child_required_fields = (
                 self._resolve_relation_mapping(
                     relation_def,
@@ -213,7 +242,6 @@ class QueryPlanner:
             combined_filters = list(relation_selection.filters) + extra_filters
 
             # Create step for this relation
-            # Pass child_required_fields so child step has the fields needed for further chaining
             relation_step = self._create_step(
                 entity_name=target_entity_name,
                 entity_def=target_entity_def,
@@ -235,6 +263,135 @@ class QueryPlanner:
                 parent_step=relation_step,
                 steps=steps,
             )
+
+    def _plan_provider_relation(
+        self,
+        relation_name: str,
+        relation_def: dict,
+        relation_selection: NormalizedSelectionNode,
+        parent_entity_def: dict,
+        parent_step: PlanStep,
+        target_entity_name: str,
+        target_entity_def: dict,
+        cardinality: str,
+        steps: list[PlanStep],
+    ) -> Optional[PlanStep]:
+        """
+        Plan a provider relation (two-hop through Relationship entity).
+
+        Creates two steps:
+        1. Relationship step: fetch relationships matching parent IDs
+        2. Target step: fetch target entities using IDs from relationships
+
+        Returns the final target step for recursive planning.
+        """
+        # Get provider config
+        provider_name = relation_def.get("provider", "relations_db")
+        provider = self.graph.get("relation_providers", {}).get(provider_name, {})
+
+        # Provider field names
+        subject_field = provider.get("subject_field", "subject_id")
+        object_field = provider.get("object_field", "object_id")
+        type_field = provider.get("type_field", "relationship_type")
+        status_field = provider.get("status_field", "status")
+
+        # Provider entity (Relationship)
+        provider_entity_name = provider.get("entity", "Relationship")
+        provider_entity_def = self.entities.get(provider_entity_name)
+        provider_service = provider.get("service", "relations")
+
+        if not provider_entity_def:
+            # Fallback: create minimal entity def for Relationship
+            provider_entity_def = {
+                "service": provider_service,
+                "keys": ["id"],
+                "fields": {},
+            }
+
+        direction = relation_def.get("direction", "out")
+
+        # Determine which fields to use based on direction
+        # direction="in": parent.id matches subject_id, get object_id for target
+        # direction="out": parent.id matches object_id, get subject_id for target
+        if direction == "in":
+            parent_match_field = subject_field  # e.g., "subject_id"
+            target_id_field = object_field      # e.g., "object_id"
+        else:
+            parent_match_field = object_field   # e.g., "object_id"
+            target_id_field = subject_field     # e.g., "subject_id"
+
+        # Parent key field
+        parent_keys = parent_entity_def.get("keys", ["id"])
+        parent_key_field = parent_keys[0]
+
+        # Build filters for Relationship step
+        rel_filters: list[NormalizedFilter] = []
+
+        # Add type filter
+        rel_type = relation_def.get("type")
+        if rel_type:
+            rel_filters.append(
+                NormalizedFilter(field=type_field, op="eq", value=rel_type)
+            )
+
+        # Add status filter
+        status = relation_def.get("status")
+        if status:
+            rel_filters.append(
+                NormalizedFilter(field=status_field, op="eq", value=status)
+            )
+
+        # Step 1: Fetch Relationship records
+        # Fields needed: the target_id_field (to link to target entity)
+        rel_step = PlanStep(
+            id=self._next_step_id("Relationship"),
+            entity=provider_entity_name,
+            service=provider_service,
+            filters=rel_filters,
+            select_fields=[target_id_field, parent_match_field],
+            order=[],
+            limit=None,  # Get all matching relationships
+            offset=0,
+            depends_on=parent_step.id,
+            parent_key_field=parent_key_field,
+            child_match_field=parent_match_field,
+            attach_as=None,  # Internal step, not attached directly
+            cardinality="many",
+        )
+        steps.append(rel_step)
+
+        # Step 2: Fetch target entities using IDs from Relationship
+        target_keys = target_entity_def.get("keys", ["id"])
+        target_key = target_keys[0]
+
+        # Start with user-requested fields
+        target_fields = list(relation_selection.fields)
+        # Always include the key field
+        if target_key not in target_fields:
+            target_fields.append(target_key)
+
+        target_step = PlanStep(
+            id=self._next_step_id(target_entity_name),
+            entity=target_entity_name,
+            service=target_entity_def.get("service"),
+            filters=list(relation_selection.filters),  # User filters on target
+            select_fields=target_fields,
+            order=relation_selection.order,
+            limit=relation_selection.limit,
+            offset=relation_selection.offset,
+            depends_on=rel_step.id,
+            parent_key_field=target_id_field,  # Get this field from Relationship (object_id or subject_id)
+            child_match_field=target_key,       # Match against target's key (id)
+            attach_as=relation_name,
+            cardinality=cardinality,
+            # Two-hop linking: attach to original parent, not to Relationship
+            attach_to_step_id=parent_step.id,
+            link_through_step_id=rel_step.id,
+            link_field=parent_match_field,  # e.g., subject_id links Relationship back to Company
+        )
+        steps.append(target_step)
+
+        return target_step
 
     def _resolve_relation_mapping(
         self,
@@ -318,47 +475,8 @@ class QueryPlanner:
 
             return parent_key_field, child_match_field, extra_filters, child_required_fields
 
-        # Legacy: through relation (via intermediate model like Relationship)
-        through = relation_def.get("through")
-        if through:
-            # Parent key is typically "id"
-            parent_keys = parent_entity_def.get("keys", ["id"])
-            parent_key_field = parent_keys[0]
-
-            # Child (through entity) matches on parent_match_field (e.g., object_id)
-            child_match_field = through.get("parent_match_field", "object_id")
-
-            # Child needs target_key_field for further chaining (e.g., subject_id)
-            target_key_field = through.get("target_key_field")
-            if target_key_field:
-                child_required_fields.append(target_key_field)
-
-            # Also need parent_match_field to be returned for linking
-            child_required_fields.append(child_match_field)
-
-            # Add relationship_type filter if specified
-            rel_type = through.get("relationship_type")
-            if rel_type:
-                extra_filters.append(
-                    NormalizedFilter(field="relationship_type", op="eq", value=rel_type)
-                )
-
-            return parent_key_field, child_match_field, extra_filters, child_required_fields
-
-        # Legacy: direct ref relation (FK)
-        ref = relation_def.get("ref")
-        if ref:
-            # Parent key is the from_field (e.g., subject_id in Relationship)
-            parent_key_field = ref.get("from_field")
-            # Child matches on to_field (e.g., id in Property)
-            child_match_field = ref.get("to_field", "id")
-
-            # Child needs to return the match field
-            child_required_fields.append(child_match_field)
-
-            return parent_key_field, child_match_field, extra_filters, child_required_fields
-
-        # Default: assume standard id-based relation
+        # Fallback: relation without kind (should not happen after normalization)
+        # Use standard id-based linking
         parent_keys = parent_entity_def.get("keys", ["id"])
         target_keys = target_entity_def.get("keys", ["id"])
         return parent_keys[0], target_keys[0], extra_filters, child_required_fields

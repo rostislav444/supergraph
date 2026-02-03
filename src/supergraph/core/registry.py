@@ -24,7 +24,7 @@ from __future__ import annotations
 
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Dict, Literal, Optional
 
 from supergraph.viewsets.base import (
     AttachRelation,
@@ -85,7 +85,6 @@ class EntityIR:
     """Intermediate representation of an entity."""
     name: str
     service: str
-    resource: str
     keys: list[str] = field(default_factory=lambda: ["id"])
     fields: dict[str, FieldIR] = field(default_factory=dict)
     relations: dict[str, RelationIR] = field(default_factory=dict)
@@ -172,31 +171,53 @@ class GraphRegistry:
         }
 
     def _apply_attached_relation(self, attach: AttachRelation):
-        """Apply an attached relation to parent entity."""
+        """
+        Apply an attached relation to parent entity.
+
+        Normalizes relations to canonical format:
+        - kind="provider" for relations through relations service
+        - kind="ref" for direct FK relations
+        """
         parent_entity = self._entities.get(attach.parent_entity)
         if parent_entity is None:
             # Parent entity not registered yet - skip silently
             return
 
-        # Build relation dict
-        rel = {
+        # Build relation dict in normalized format
+        rel: dict[str, Any] = {
             "target": attach.target_entity,
             "cardinality": attach.cardinality,
         }
 
-        if attach.through:
-            rel["through"] = {
-                "model": attach.target_entity,
-                "relationship_type": attach.through.static_filters.get("relationship_type", ""),
-                "parent_match_field": attach.through.child_match_field,
-                "target_key_field": attach.through.target_key_field,
-            }
-
+        # Explicit ref relation (direct FK)
         if attach.ref:
+            rel["kind"] = "ref"
             rel["ref"] = {
                 "from_field": attach.ref.from_field,
                 "to_field": attach.ref.to_field,
             }
+
+        # Explicit through relation (via junction table) - convert to provider
+        elif attach.through:
+            rel["kind"] = "provider"
+            rel["provider"] = "relations_db"
+            # Determine direction from match fields
+            parent_match = attach.through.child_match_field
+            if parent_match == "object_id":
+                rel["direction"] = "out"
+            else:
+                rel["direction"] = "in"
+            rel["type"] = attach.through.static_filters.get("relationship_type", "")
+            rel["status"] = attach.through.static_filters.get("status", "active")
+
+        # Simplified format using relationship_type
+        elif attach.relationship_type:
+            rel["kind"] = "provider"
+            rel["provider"] = "relations_db"
+            rel["type"] = attach.relationship_type
+            rel["status"] = attach.filters.get("status", "active")
+            # Direction from AttachRelation config
+            rel["direction"] = attach.direction
 
         # Add relation to parent entity
         if "relations" not in parent_entity:

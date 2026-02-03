@@ -136,13 +136,12 @@ class PlanExecutor:
         # Execute the fetch
         return await self.client.fetch(
             service_url=service_url,
-            resource=step.resource,
+            entity=step.entity,
             filters=all_filters,
             fields=step.select_fields,
             order=step.order,
             limit=step.limit,
             offset=step.offset,
-            entity=step.entity,
         )
 
     def _resolve_filters(
@@ -166,6 +165,9 @@ class PlanExecutor:
                     parent_result.items,
                     step.parent_key_field
                 )
+                # Convert to strings for subject_id/object_id fields (they're varchar in Relationship table)
+                if step.child_match_field in ("subject_id", "object_id"):
+                    parent_ids = [str(v) for v in parent_ids]
                 # Add IN filter
                 resolved.append(
                     NormalizedFilter(

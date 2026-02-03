@@ -63,22 +63,38 @@ def get_service_schema(viewsets: list) -> dict[str, Any]:
             # RelationsViewSet also provides attached relations
             if issubclass(vs, RelationsViewSet):
                 for attach in vs.get_attached_relations():
-                    attached_relations.append({
+                    rel_def = {
                         "parent_entity": attach.parent_entity,
-                        "name": attach.field_name,
+                        "name": attach.name,
                         "target_entity": attach.target_entity,
                         "cardinality": attach.cardinality,
-                        "through": {
+                    }
+
+                    # Provider relation (simplified format with relationship_type)
+                    if attach.relationship_type:
+                        rel_def["kind"] = "provider"
+                        rel_def["provider"] = "relations_db"
+                        rel_def["type"] = attach.relationship_type
+                        rel_def["status"] = attach.filters.get("status", "active")
+                        rel_def["direction"] = attach.direction
+
+                    # Explicit through relation
+                    if attach.through:
+                        rel_def["through"] = {
                             "parent_key": attach.through.parent_key,
                             "child_match_field": attach.through.child_match_field,
                             "target_key_field": attach.through.target_key_field,
                             "static_filters": attach.through.static_filters,
-                        } if attach.through else None,
-                        "ref": {
+                        }
+
+                    # Explicit ref relation
+                    if attach.ref:
+                        rel_def["ref"] = {
                             "from_field": attach.ref.from_field,
                             "to_field": attach.ref.to_field,
-                        } if attach.ref else None,
-                    })
+                        }
+
+                    attached_relations.append(rel_def)
 
         # Subscription → WebSocket subscription
         elif issubclass(vs, Subscription):

@@ -156,16 +156,30 @@ class Gateway:
                     entities[parent_entity]["relations"] = {}
 
                 rel_name = attach["name"]
-                entities[parent_entity]["relations"][rel_name] = {
+                rel_def = {
                     "target": attach["target_entity"],
                     "cardinality": attach.get("cardinality", "many"),
                 }
 
-                if attach.get("through"):
-                    entities[parent_entity]["relations"][rel_name]["through"] = attach["through"]
+                # Copy provider relation fields
+                if attach.get("kind"):
+                    rel_def["kind"] = attach["kind"]
+                if attach.get("provider"):
+                    rel_def["provider"] = attach["provider"]
+                if attach.get("type"):
+                    rel_def["type"] = attach["type"]
+                if attach.get("status"):
+                    rel_def["status"] = attach["status"]
+                if attach.get("direction"):
+                    rel_def["direction"] = attach["direction"]
 
+                # Copy through/ref for legacy format
+                if attach.get("through"):
+                    rel_def["through"] = attach["through"]
                 if attach.get("ref"):
-                    entities[parent_entity]["relations"][rel_name]["ref"] = attach["ref"]
+                    rel_def["ref"] = attach["ref"]
+
+                entities[parent_entity]["relations"][rel_name] = rel_def
 
         # Build legacy graph first
         legacy_graph = {

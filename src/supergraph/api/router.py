@@ -140,6 +140,175 @@ async def get_graph_typescript(graph: dict = Depends(get_graph)) -> str:
     return generate_typescript(graph)
 
 
+@router.get("/__graph/entity/{entity}")
+async def get_entity_schema(
+    entity: str,
+    graph: dict = Depends(get_graph),
+) -> dict[str, Any]:
+    """
+    Return schema for a single entity.
+
+    Used by frontend for auto-generating forms.
+    Returns entity fields, relations, and form metadata.
+
+    Example response:
+    {
+        "name": "CompanyEmployee",
+        "keys": ["id"],
+        "fields": {
+            "id": {"name": "id", "type": "int", "required": true, "formType": "integer"},
+            "name": {"name": "name", "type": "string", "required": true, "formType": "string"},
+            "email": {"name": "email", "type": "string", "required": false, "formType": "email"}
+        },
+        "relations": {
+            "role": {"target": "CompanyEmployeeRole", "cardinality": "one", "refField": "role_id"}
+        },
+        "selectableRelations": ["role"]
+    }
+    """
+    entities = graph.get("entities", {})
+    if entity not in entities:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": f"Entity '{entity}' not found"}
+        )
+
+    entity_def = entities[entity]
+    fields = entity_def.get("fields", {})
+    relations = entity_def.get("relations", {})
+
+    # Map backend types to form field types
+    type_mapping = {
+        "int": "integer",
+        "int?": "integer",
+        "bigint": "integer",
+        "bigint?": "integer",
+        "string": "string",
+        "string?": "string",
+        "text": "textarea",
+        "text?": "textarea",
+        "bool": "boolean",
+        "bool?": "boolean",
+        "datetime": "date",
+        "datetime?": "date",
+        "date": "date",
+        "date?": "date",
+        "float": "float",
+        "float?": "float",
+        "decimal": "float",
+        "decimal?": "float",
+        "json": "string",
+        "json?": "string",
+    }
+
+    # Detect email/phone fields by name
+    def detect_form_type(field_name: str, field_type: str) -> str:
+        base_type = type_mapping.get(field_type, "string")
+        if base_type == "string":
+            if "email" in field_name.lower():
+                return "email"
+            if "phone" in field_name.lower():
+                return "phone"
+        return base_type
+
+    # Build map of FK fields from relations (ref.from_field -> relation)
+    fk_field_to_relation: dict[str, tuple[str, dict]] = {}
+    for rel_name, rel_def in relations.items():
+        ref = rel_def.get("ref", {})
+        if ref and rel_def.get("cardinality") == "one":
+            from_field = ref.get("from_field")
+            if from_field:
+                fk_field_to_relation[from_field] = (rel_name, rel_def)
+
+    # Also detect FK by naming convention (*_id -> Entity)
+    # Try to find matching entity for fields ending with _id
+    def find_related_entity(field_name: str) -> str | None:
+        if not field_name.endswith("_id"):
+            return None
+
+        # Extract base name: role_id -> role, company_id -> company
+        base_name = field_name[:-3]  # Remove "_id"
+
+        # Try different naming conventions to find the entity
+        candidates = [
+            # Same prefix as current entity: CompanyEmployee.role_id -> CompanyEmployeeRole
+            f"{entity}{base_name.title().replace('_', '')}",
+            # Just capitalize: role_id -> Role
+            base_name.title().replace("_", ""),
+            # With Company prefix: role_id -> CompanyRole
+            f"Company{base_name.title().replace('_', '')}",
+        ]
+
+        for candidate in candidates:
+            if candidate in entities:
+                return candidate
+
+        return None
+
+    # Process fields with form metadata
+    processed_fields = {}
+    for field_name, field_def in fields.items():
+        field_type = field_def.get("type", "string")
+        is_nullable = field_type.endswith("?") or field_def.get("nullable", True)
+
+        field_info: dict[str, Any] = {
+            "name": field_name,
+            "type": field_type.rstrip("?"),
+            "required": not is_nullable,
+            "formType": detect_form_type(field_name, field_type),
+            "sortable": field_def.get("sortable", False),
+            "filters": field_def.get("filters", []),
+        }
+
+        # Check if this is a FK field (from relations or naming convention)
+        if field_name in fk_field_to_relation:
+            rel_name, rel_def = fk_field_to_relation[field_name]
+            field_info["formType"] = "select"
+            field_info["foreignKey"] = {
+                "entity": rel_def.get("target"),
+                "relationName": rel_name,
+                "labelField": "name",  # Default, can be overridden on frontend
+            }
+        elif field_name.endswith("_id") and field_name != "id":
+            # Try to detect FK by naming convention
+            related_entity = find_related_entity(field_name)
+            if related_entity:
+                field_info["formType"] = "select"
+                field_info["foreignKey"] = {
+                    "entity": related_entity,
+                    "relationName": field_name[:-3],  # role_id -> role
+                    "labelField": "name",
+                }
+
+        processed_fields[field_name] = field_info
+
+    # Process relations - find which can be used as selects
+    processed_relations = {}
+    selectable_relations = []
+
+    for rel_name, rel_def in relations.items():
+        cardinality = rel_def.get("cardinality", "many")
+        ref = rel_def.get("ref", {})
+
+        processed_relations[rel_name] = {
+            "target": rel_def.get("target"),
+            "cardinality": cardinality,
+            "refField": ref.get("from_field") if ref else None,
+        }
+
+        # Relations with cardinality "one" can be used as selects
+        if cardinality == "one" and ref:
+            selectable_relations.append(rel_name)
+
+    return {
+        "name": entity,
+        "keys": entity_def.get("keys", ["id"]),
+        "fields": processed_fields,
+        "relations": processed_relations,
+        "selectableRelations": selectable_relations,
+    }
+
+
 @router.post("/")
 @router.post("/query")
 async def execute_request(

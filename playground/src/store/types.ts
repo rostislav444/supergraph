@@ -37,6 +37,9 @@ export interface BuilderState {
   pagination: Record<string, { limit?: number | null; offset?: number | null }>
   documentation: unknown
   syncSource: 'builder' | 'editor' | null
+  // Expand config for belongsTo relations
+  // { "Vehicle": { "make": ["id", "name"], "model": ["id", "name"] } }
+  selectedExpands: Record<string, Record<string, string[]>>
 }
 
 // Display slice state

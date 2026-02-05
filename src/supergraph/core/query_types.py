@@ -38,11 +38,22 @@ class NormalizedOrder(BaseModel):
 
 # --- Input types (from client) ---
 
+class ExpandNode(BaseModel):
+    """
+    Expand node for belongsTo relations (FK -> parent entity).
+
+    Used to load parent entities in a single batch query.
+    Example: expand: {"make": ["id", "name"]} expands Vehicle.make_id -> VehicleMake
+    """
+    fields: list[str] = Field(default_factory=list)
+
+
 class SelectionNode(BaseModel):
     """
     Selection node for query - defines what to fetch at each level.
 
     Supports nested relations with their own filters/order/pagination.
+    Also supports expand for belongsTo (parent) relations.
     """
     fields: list[str] = Field(default_factory=list)
     filters: dict[str, Any] = Field(default_factory=dict)  # raw: {"name__icontains": "test"}
@@ -50,6 +61,8 @@ class SelectionNode(BaseModel):
     limit: Optional[int] = None
     offset: int = 0
     relations: dict[str, SelectionNode] = Field(default_factory=dict)
+    # Expand belongsTo relations: {"make": ["id", "name"]} or {"make": {"fields": ["id", "name"]}}
+    expand: dict[str, Union[list[str], ExpandNode]] = Field(default_factory=dict)
 
 
 class JSONQuery(BaseModel):
@@ -77,6 +90,13 @@ class JSONQuery(BaseModel):
 
 # --- Normalized query (after validation) ---
 
+class NormalizedExpandNode(BaseModel):
+    """Normalized expand node for belongsTo relations."""
+    fields: list[str]
+    fk_field: str  # The FK field in parent entity (e.g., "make_id")
+    target_entity: str  # The target entity name (e.g., "VehicleMake")
+
+
 class NormalizedSelectionNode(BaseModel):
     """Selection node with normalized filters and order."""
     fields: list[str]
@@ -85,6 +105,7 @@ class NormalizedSelectionNode(BaseModel):
     limit: Optional[int]
     offset: int
     relations: dict[str, NormalizedSelectionNode]
+    expand: dict[str, NormalizedExpandNode] = Field(default_factory=dict)
 
 
 class NormalizedQuery(BaseModel):

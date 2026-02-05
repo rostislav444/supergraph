@@ -5,6 +5,7 @@ import { EntityList } from '@molecules/EntityList'
 import { FilterSection } from '@molecules/FilterSection'
 import { PaginationSection } from '@molecules/PaginationSection'
 import { RelationItem } from '@molecules/RelationItem'
+import { ExpandItem } from '@molecules/ExpandItem'
 import { TransactionBuilder } from '@organisms/TransactionBuilder'
 import { CreateModeBuilder } from './CreateModeBuilder'
 import {
@@ -19,11 +20,15 @@ import {
   toggleExpanded,
   setFilter,
   setPagination,
+  toggleExpandField,
+  selectAllExpandFields,
+  clearExpandFields,
   selectRootEntity,
   selectSelectedFields,
   selectExpandedPaths,
   selectFilters,
   selectPagination,
+  selectSelectedExpands,
 } from '../../../store/builderSlice'
 import { setQueryText, selectOperationMode, selectQueryText } from '../../../store/querySlice'
 import { parseEditorContent } from '@utils/queryParser'
@@ -133,6 +138,7 @@ export function SchemaExplorer() {
   const expandedPaths = useSelector(selectExpandedPaths)
   const filters = useSelector(selectFilters)
   const pagination = useSelector(selectPagination)
+  const selectedExpands = useSelector(selectSelectedExpands)
   const operationMode = useSelector(selectOperationMode)
   const queryText = useSelector(selectQueryText)
 
@@ -167,6 +173,59 @@ export function SchemaExplorer() {
     [entityDef]
   )
 
+  // Detect expandable FK fields (fields with _id suffix that have a target entity)
+  const expandableFields = useMemo(() => {
+    if (!entityDef || !graph || !rootEntity) return []
+
+    const result: Array<{
+      fkFieldName: string
+      expandName: string
+      targetEntity: string
+    }> = []
+
+    for (const [fieldName, field] of Object.entries(entityDef.fields || {})) {
+      // Check if field has explicit FK info
+      if (field.fk?.target_entity) {
+        const expandName = fieldName.replace(/_id$/, '')
+        result.push({
+          fkFieldName: fieldName,
+          expandName,
+          targetEntity: field.fk.target_entity,
+        })
+        continue
+      }
+
+      // Fallback: detect FK by naming convention (field_id -> Entity)
+      if (fieldName.endsWith('_id') && fieldName !== 'id') {
+        const expandName = fieldName.replace(/_id$/, '')
+        const expandCapitalized = expandName
+          .split('_')
+          .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+          .join('')
+
+        // Try to find target entity by naming convention
+        const candidates = [
+          `${rootEntity}${expandCapitalized}`, // VehicleMake
+          expandCapitalized, // Make
+          `Company${expandCapitalized}`, // CompanyMake
+        ]
+
+        for (const candidate of candidates) {
+          if (graph.entities[candidate]) {
+            result.push({
+              fkFieldName: fieldName,
+              expandName,
+              targetEntity: candidate,
+            })
+            break
+          }
+        }
+      }
+    }
+
+    return result
+  }, [entityDef, graph, rootEntity])
+
   const handleSelectEntity = useCallback(
     (name: string) => dispatch(setRootEntity(name)),
     [dispatch]
@@ -193,6 +252,20 @@ export function SchemaExplorer() {
   const handleSetPagination = useCallback(
     (paginationData: { path: string; limit: number | null; offset: number | null }) =>
       dispatch(setPagination(paginationData)),
+    [dispatch]
+  )
+  const handleToggleExpandField = useCallback(
+    (path: string, expandName: string, field: string) =>
+      dispatch(toggleExpandField({ path, expandName, field })),
+    [dispatch]
+  )
+  const handleSelectAllExpandFields = useCallback(
+    (path: string, expandName: string, fields: string[]) =>
+      dispatch(selectAllExpandFields({ path, expandName, fields })),
+    [dispatch]
+  )
+  const handleClearExpandFields = useCallback(
+    (path: string, expandName: string) => dispatch(clearExpandFields({ path, expandName })),
     [dispatch]
   )
 
@@ -223,6 +296,7 @@ export function SchemaExplorer() {
       const pathFields = selectedFields[path] || []
       const pathFilters = filters[path] || {}
       const pathPagination = pagination[path] || {}
+      const pathExpands = selectedExpands[path] || {}
 
       if (pathFields.length > 0) selection.fields = pathFields
       if (Object.keys(pathFilters).length > 0) selection.filters = pathFilters
@@ -233,6 +307,11 @@ export function SchemaExplorer() {
         selection.limit = 100 // Default limit for root
       }
       if (pathPagination.offset) selection.offset = pathPagination.offset
+
+      // Add expand (belongsTo relations)
+      if (Object.keys(pathExpands).length > 0) {
+        selection.expand = pathExpands
+      }
 
       const nestedRelations: Record<string, unknown> = {}
       const entityRelations = (entityDef.relations || {}) as Record<string, Relation>
@@ -248,7 +327,7 @@ export function SchemaExplorer() {
     }
 
     return { [rootEntity]: buildSelection(rootEntity, rootEntity) }
-  }, [rootEntity, graph, selectedFields, filters, pagination, expandedPaths])
+  }, [rootEntity, graph, selectedFields, filters, pagination, expandedPaths, selectedExpands])
 
   // Handle update query for create mode
   const handleUpdateQueryText = useCallback(
@@ -270,7 +349,7 @@ export function SchemaExplorer() {
     if (isMutationMode || isTransactionMode || !rootEntity) return
 
     // Create a key to track if builder state actually changed from user clicking
-    const currentKey = JSON.stringify({ selectedFields, filters, pagination })
+    const currentKey = JSON.stringify({ selectedFields, filters, pagination, selectedExpands })
 
     // Skip if nothing changed or this is the first render
     if (prevBuilderStateRef.current === currentKey) return
@@ -289,6 +368,7 @@ export function SchemaExplorer() {
     selectedFields,
     filters,
     pagination,
+    selectedExpands,
     buildQueryFromBuilder,
     dispatch,
     isMutationMode,
@@ -462,6 +542,29 @@ export function SchemaExplorer() {
           pagination={pagination[rootEntity]}
           onSetPagination={handleSetPagination}
         />
+
+        {/* Expand (belongsTo / FK relations) */}
+        {expandableFields.length > 0 && (
+          <div className="mt-3">
+            <span className="text-xs text-gray-500 uppercase px-2">Expand (FK)</span>
+            {expandableFields.map(({ fkFieldName, expandName, targetEntity }) => (
+              <ExpandItem
+                key={fkFieldName}
+                fkFieldName={fkFieldName}
+                expandName={expandName}
+                targetEntity={targetEntity}
+                path={rootEntity}
+                graph={graph}
+                selectedExpands={selectedExpands}
+                expandedPaths={expandedPaths}
+                onToggleExpand={handleToggleExpand}
+                onToggleField={handleToggleExpandField}
+                onSelectAll={handleSelectAllExpandFields}
+                onClearFields={handleClearExpandFields}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Relations */}
         {relations.length > 0 && (

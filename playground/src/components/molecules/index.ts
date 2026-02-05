@@ -16,6 +16,7 @@ export { FilterInput, type FilterInputProps } from './FilterInput'
 export { FilterSection, type FilterSectionProps } from './FilterSection'
 export { PaginationSection, type PaginationSectionProps, type PaginationData } from './PaginationSection'
 export { RelationItem, type RelationItemProps } from './RelationItem'
+export { ExpandItem, type ExpandItemProps } from './ExpandItem'
 
 // Navigation components
 export { PaginationControls, type PaginationControlsProps } from './PaginationControls'

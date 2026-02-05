@@ -5,12 +5,14 @@ Creates a pre-configured FastAPI application with:
 - CORS middleware
 - Health check endpoints
 - Lifecycle hooks for database
+- Logging filter to suppress noisy healthcheck logs
 """
 
 from __future__ import annotations
 
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Callable
@@ -19,6 +21,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db, close_db
+
+
+class HealthcheckLogFilter(logging.Filter):
+    """Filter out noisy healthcheck and schema endpoint logs."""
+
+    FILTERED_PATHS = ("/__schema", "/health")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        for path in self.FILTERED_PATHS:
+            if f'"{path}' in message or f" {path} " in message:
+                return False
+        return True
+
+
+def _setup_logging_filter():
+    """Add filter to uvicorn access logger to suppress healthcheck logs."""
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.addFilter(HealthcheckLogFilter())
 
 
 def create_service_app(
@@ -44,6 +65,7 @@ def create_service_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
+        _setup_logging_filter()
         if init_database:
             await init_db()
         if on_startup:

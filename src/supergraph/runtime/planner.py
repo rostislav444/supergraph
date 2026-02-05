@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
 from ..core.query_types import (
+    NormalizedExpandNode,
     NormalizedFilter,
     NormalizedOrder,
     NormalizedQuery,
@@ -52,6 +53,10 @@ class PlanStep:
     attach_to_step_id: Optional[str] = None  # Step to attach results to (if different from depends_on's parent)
     link_through_step_id: Optional[str] = None  # Intermediate step that links this to attach_to
     link_field: Optional[str] = None  # Field in intermediate step that links to attach_to (e.g., subject_id)
+
+    # For expand (belongsTo) relations: reverse lookup by FK
+    is_expand: bool = False  # True if this is an expand step (parent lookup)
+    expand_fk_field: Optional[str] = None  # FK field in parent entity (e.g., "make_id")
 
     def get_all_filters(self) -> list[NormalizedFilter]:
         """Get combined client filters and guard filters."""
@@ -121,6 +126,13 @@ class QueryPlanner:
         self._plan_relations(
             selection=query.select,
             parent_entity_def=entity_def,
+            parent_step=root_step,
+            steps=steps,
+        )
+
+        # Plan expand (belongsTo) relations
+        self._plan_expand(
+            selection=query.select,
             parent_step=root_step,
             steps=steps,
         )
@@ -263,6 +275,64 @@ class QueryPlanner:
                 parent_step=relation_step,
                 steps=steps,
             )
+
+        # Plan expand (belongsTo) at this level
+        self._plan_expand(
+            selection=selection,
+            parent_step=parent_step,
+            steps=steps,
+        )
+
+    def _plan_expand(
+        self,
+        selection: NormalizedSelectionNode,
+        parent_step: PlanStep,
+        steps: list[PlanStep],
+    ):
+        """
+        Plan steps for expand (belongsTo) relations.
+
+        For each expand, creates a step to fetch parent entities by ID.
+        Uses batch fetching: collect unique FK values, query by id IN (...).
+
+        Example: Vehicle with expand: {"make": ["id", "name"]}
+        - Extract unique make_id values from Vehicle results
+        - Query VehicleMake WHERE id IN (unique_make_ids)
+        - Attach make object to each Vehicle based on make_id
+        """
+        for expand_name, expand_node in selection.expand.items():
+            target_entity = expand_node.target_entity
+            target_entity_def = self.entities.get(target_entity)
+            if not target_entity_def:
+                continue
+
+            # Start with requested fields
+            fields = list(expand_node.fields)
+
+            # Always include "id" for matching
+            if "id" not in fields:
+                fields.append("id")
+
+            # Create expand step
+            # Note: filters will be added at execution time (id IN unique_fk_values)
+            expand_step = PlanStep(
+                id=self._next_step_id(target_entity),
+                entity=target_entity,
+                service=target_entity_def.get("service"),
+                filters=[],  # Will be populated at execution time
+                select_fields=fields,
+                order=[],
+                limit=None,  # Get all matching parents
+                offset=0,
+                depends_on=parent_step.id,
+                parent_key_field=expand_node.fk_field,  # e.g., "make_id" - field to extract from parent
+                child_match_field="id",  # Target entity's id field
+                attach_as=expand_name,  # e.g., "make"
+                cardinality="one",  # belongsTo is always one
+                is_expand=True,  # Mark as expand step
+                expand_fk_field=expand_node.fk_field,  # FK field for reverse lookup
+            )
+            steps.append(expand_step)
 
     def _plan_provider_relation(
         self,

@@ -53,6 +53,22 @@ OPERATION_KEYS = {"query", "create", "update", "rewrite", "delete", "transaction
 
 
 @dataclass
+class ExpandConfig:
+    """Configuration for expanding a belongsTo relation."""
+    fields: List[str]
+
+    @classmethod
+    def from_value(cls, value: Any) -> "ExpandConfig":
+        """Parse expand config from list or dict."""
+        if isinstance(value, list):
+            return cls(fields=value)
+        elif isinstance(value, dict):
+            return cls(fields=value.get("fields", []))
+        else:
+            raise ValidationError(f"Invalid expand config: {value}")
+
+
+@dataclass
 class EntityQuery:
     """Parsed query for a single entity."""
     entity: str
@@ -62,6 +78,7 @@ class EntityQuery:
     limit: Optional[int] = None
     offset: int = 0
     relations: dict[str, "EntityQuery"] = field(default_factory=dict)
+    expand: dict[str, ExpandConfig] = field(default_factory=dict)  # belongsTo relations
 
     @classmethod
     def from_dict(cls, entity: str, data: dict) -> "EntityQuery":
@@ -80,6 +97,10 @@ class EntityQuery:
                     name: EntityQuery.from_dict(name, rel_data)
                     for name, rel_data in select.get("relations", {}).items()
                 },
+                expand={
+                    name: ExpandConfig.from_value(exp_data)
+                    for name, exp_data in select.get("expand", {}).items()
+                },
             )
         else:
             # Flat format
@@ -93,6 +114,10 @@ class EntityQuery:
                 relations={
                     name: EntityQuery.from_dict(name, rel_data)
                     for name, rel_data in data.get("relations", {}).items()
+                },
+                expand={
+                    name: ExpandConfig.from_value(exp_data)
+                    for name, exp_data in data.get("expand", {}).items()
                 },
             )
 

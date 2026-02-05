@@ -11,6 +11,7 @@ from typing import Any, List, Optional, Tuple
 
 from .query_types import (
     JSONQuery,
+    NormalizedExpandNode,
     NormalizedFilter,
     NormalizedOrder,
     NormalizedQuery,
@@ -72,7 +73,7 @@ class QueryValidator:
 
         # Normalize and validate selection
         normalized_select, select_errors = self._normalize_selection(
-            query.select, entity_def, f"{query.entity}"
+            query.select, entity_def, f"{query.entity}", query.entity
         )
         errors.extend(select_errors)
 
@@ -171,8 +172,43 @@ class QueryValidator:
 
         return order, errors
 
+    def _find_expand_target_entity(
+        self, expand_name: str, entity_name: str, fields_def: dict
+    ) -> tuple[str | None, str | None]:
+        """
+        Find target entity for expand based on naming convention.
+
+        For expand name "make", looks for field "make_id" and finds entity:
+        - {EntityName}{ExpandName} (e.g., VehicleMake for Vehicle.make)
+        - {ExpandName} capitalized (e.g., Make)
+        - Company{ExpandName} (e.g., CompanyMake)
+
+        Returns:
+            Tuple of (fk_field, target_entity) or (None, None) if not found
+        """
+        # FK field name (e.g., "make" -> "make_id")
+        fk_field = f"{expand_name}_id"
+
+        # Check if FK field exists
+        if fk_field not in fields_def:
+            return None, None
+
+        # Try to find target entity by naming convention
+        expand_capitalized = expand_name.replace("_", " ").title().replace(" ", "")
+        candidates = [
+            f"{entity_name}{expand_capitalized}",  # VehicleMake
+            expand_capitalized,                      # Make
+            f"Company{expand_capitalized}",          # CompanyMake
+        ]
+
+        for candidate in candidates:
+            if candidate in self.entities:
+                return fk_field, candidate
+
+        return fk_field, None
+
     def _normalize_selection(
-        self, selection: SelectionNode, entity_def: dict, path: str
+        self, selection: SelectionNode, entity_def: dict, path: str, entity_name: str = ""
     ) -> tuple[NormalizedSelectionNode, list[str]]:
         """
         Recursively normalize and validate a selection node.
@@ -201,6 +237,48 @@ class QueryValidator:
         )
         errors.extend(order_errors)
 
+        # Normalize expand (belongsTo relations)
+        normalized_expand: dict[str, NormalizedExpandNode] = {}
+        for expand_name, expand_config in selection.expand.items():
+            # Find FK field and target entity
+            fk_field, target_entity = self._find_expand_target_entity(
+                expand_name, entity_name, fields_def
+            )
+
+            if not fk_field:
+                errors.append(f"{path}: expand '{expand_name}' - no FK field '{expand_name}_id' found")
+                continue
+
+            if not target_entity:
+                errors.append(
+                    f"{path}: expand '{expand_name}' - could not find target entity for FK '{fk_field}'"
+                )
+                continue
+
+            # Validate requested fields exist in target entity
+            target_entity_def = self.entities[target_entity]
+            target_fields_def = target_entity_def.get("fields", {})
+
+            # Get fields from expand config
+            expand_fields = expand_config.fields if hasattr(expand_config, 'fields') else expand_config
+
+            validated_expand_fields: list[str] = []
+            for field_name in expand_fields:
+                if field_name not in target_fields_def:
+                    errors.append(f"{path}.{expand_name}: field '{field_name}' not found in {target_entity}")
+                else:
+                    validated_expand_fields.append(field_name)
+
+            # Ensure FK field is in selected fields (needed for joining)
+            if fk_field not in validated_fields:
+                validated_fields.append(fk_field)
+
+            normalized_expand[expand_name] = NormalizedExpandNode(
+                fields=validated_expand_fields,
+                fk_field=fk_field,
+                target_entity=target_entity,
+            )
+
         # Recursively validate relations
         normalized_relations: dict[str, NormalizedSelectionNode] = {}
         for relation_name, relation_selection in selection.relations.items():
@@ -223,7 +301,7 @@ class QueryValidator:
 
             # Recursively normalize nested selection
             nested_normalized, nested_errors = self._normalize_selection(
-                relation_selection, target_entity_def, f"{path}.{relation_name}"
+                relation_selection, target_entity_def, f"{path}.{relation_name}", target_entity_name
             )
             errors.extend(nested_errors)
             normalized_relations[relation_name] = nested_normalized
@@ -236,6 +314,7 @@ class QueryValidator:
                 limit=selection.limit,
                 offset=selection.offset,
                 relations=normalized_relations,
+                expand=normalized_expand,
             ),
             errors,
         )

@@ -380,6 +380,10 @@ async def _execute_queries(
                     name: _entity_query_to_selection(rel)
                     for name, rel in entity_query.relations.items()
                 },
+                "expand": {
+                    name: exp.fields
+                    for name, exp in entity_query.expand.items()
+                },
             },
         )
 
@@ -400,6 +404,10 @@ def _entity_query_to_selection(eq: EntityQuery) -> dict:
         "relations": {
             name: _entity_query_to_selection(rel)
             for name, rel in eq.relations.items()
+        },
+        "expand": {
+            name: exp.fields
+            for name, exp in eq.expand.items()
         },
     }
 

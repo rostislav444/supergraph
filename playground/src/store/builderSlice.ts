@@ -33,6 +33,10 @@ const initialState: BuilderState = {
   // Flag to indicate change source (prevents infinite sync loop)
   // 'builder' = change from clicking checkboxes, 'editor' = change from typing in editor
   syncSource: null,
+
+  // Expand config for belongsTo relations (FK -> parent entity)
+  // { "Vehicle": { "make": ["id", "name"], "model": ["id", "name"] } }
+  selectedExpands: {},
 }
 
 const builderSlice = createSlice({
@@ -47,6 +51,7 @@ const builderSlice = createSlice({
       state.filters = {}
       state.order = {}
       state.pagination = {}
+      state.selectedExpands = {}
     },
 
     toggleField: (state, action: PayloadAction<{ path: string; field: string }>) => {
@@ -116,6 +121,53 @@ const builderSlice = createSlice({
       state.pagination[path] = { limit, offset }
     },
 
+    // Toggle a field in expand selection
+    toggleExpandField: (
+      state,
+      action: PayloadAction<{ path: string; expandName: string; field: string }>
+    ) => {
+      const { path, expandName, field } = action.payload
+      if (!state.selectedExpands[path]) {
+        state.selectedExpands[path] = {}
+      }
+      if (!state.selectedExpands[path][expandName]) {
+        state.selectedExpands[path][expandName] = []
+      }
+      const idx = state.selectedExpands[path][expandName].indexOf(field)
+      if (idx === -1) {
+        state.selectedExpands[path][expandName].push(field)
+      } else {
+        state.selectedExpands[path][expandName].splice(idx, 1)
+        // Remove expand if no fields selected
+        if (state.selectedExpands[path][expandName].length === 0) {
+          delete state.selectedExpands[path][expandName]
+        }
+      }
+      state.syncSource = 'builder'
+    },
+
+    // Select all fields in expand
+    selectAllExpandFields: (
+      state,
+      action: PayloadAction<{ path: string; expandName: string; fields: string[] }>
+    ) => {
+      const { path, expandName, fields } = action.payload
+      if (!state.selectedExpands[path]) {
+        state.selectedExpands[path] = {}
+      }
+      state.selectedExpands[path][expandName] = [...fields]
+      state.syncSource = 'builder'
+    },
+
+    // Clear expand selection
+    clearExpandFields: (state, action: PayloadAction<{ path: string; expandName: string }>) => {
+      const { path, expandName } = action.payload
+      if (state.selectedExpands[path]) {
+        delete state.selectedExpands[path][expandName]
+      }
+      state.syncSource = 'builder'
+    },
+
     setDocumentation: (state, action: PayloadAction<unknown>) => {
       state.documentation = action.payload
     },
@@ -180,6 +232,9 @@ export const {
   removeFilter,
   setOrder,
   setPagination,
+  toggleExpandField,
+  selectAllExpandFields,
+  clearExpandFields,
   setDocumentation,
   clearDocumentation,
   resetBuilder,
@@ -199,10 +254,12 @@ export const selectPagination = (
 ): Record<string, { limit?: number | null; offset?: number | null }> => state.builder.pagination
 export const selectDocumentation = (state: RootState): unknown => state.builder.documentation
 export const selectSyncSource = (state: RootState): 'builder' | 'editor' | null => state.builder.syncSource
+export const selectSelectedExpands = (state: RootState): Record<string, Record<string, string[]>> =>
+  state.builder.selectedExpands
 
 // Build query from builder state
 export const selectBuiltQuery = (state: RootState): Record<string, unknown> | null => {
-  const { rootEntity, selectedFields, filters, order, pagination } = state.builder
+  const { rootEntity, selectedFields, filters, order, pagination, selectedExpands } = state.builder
   const graph = state.graph.data
 
   if (!rootEntity || !graph) return null
@@ -215,6 +272,7 @@ export const selectBuiltQuery = (state: RootState): Record<string, unknown> | nu
     const entityFilters = filters[path] || {}
     const entityOrder = order[path] || []
     const entityPagination = pagination[path] || {}
+    const entityExpands = selectedExpands[path] || {}
 
     const selection: Record<string, unknown> = {}
 
@@ -236,6 +294,11 @@ export const selectBuiltQuery = (state: RootState): Record<string, unknown> | nu
 
     if (entityPagination.offset) {
       selection.offset = entityPagination.offset
+    }
+
+    // Add expand (belongsTo relations)
+    if (Object.keys(entityExpands).length > 0) {
+      selection.expand = entityExpands
     }
 
     // Check for nested relations
